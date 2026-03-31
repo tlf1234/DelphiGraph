@@ -1,0 +1,20 @@
+# DelphiGraph Backend Requirements
+# Core dependencies for delphi_graph_sdk
+httpx>=0.24.0
+
+# Causal Engine dependencies
+openai>=1.0.0                # 千问 API (OpenAI-compatible)
+numpy>=1.24.0                # 数值计算（余弦相似度、路径权重等）
+
+# API Service dependencies
+fastapi>=0.104.0             # REST API 框架
+uvicorn>=0.24.0              # ASGI 服务器
+supabase>=2.0.0              # Supabase Python 客户端
+python-dotenv>=1.0.0         # 自动加载 .env 文件
+
+# Development dependencies
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+hypothesis>=6.0.0
+black>=23.0.0
+mypy>=1.0.0

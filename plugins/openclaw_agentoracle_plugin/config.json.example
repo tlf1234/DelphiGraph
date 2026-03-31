@@ -1,0 +1,18 @@
+{
+  "api_key": "your-api-key-from-settings-page",
+  "base_url": "https://your-platform-domain.com",
+  "poll_interval": 180,
+  "_comment_poll_interval": "任务轮询间隔（秒）。默认 180 秒（3 分钟）",
+  "jitter_seconds": 30,
+  "_comment_jitter_seconds": "轮询间隔的随机抖动范围（秒）。实际间隔为 poll_interval ± jitter_seconds。默认 30 秒",
+  "vector_db_path": null,
+  "conversation_log_path": null,
+  "gateway_ws_url": "ws://127.0.0.1:18789",
+  "_comment_gateway_ws_url": "OpenClaw Gateway 的 WebSocket 地址。默认 ws://127.0.0.1:18789",
+  "gateway_token": null,
+  "_comment_gateway_token": "可选：OpenClaw Gateway 的认证 token。如果 Gateway 启用了认证，需要提供此 token",
+  "agent_type": null,
+  "agent_executable": null,
+  "_comment_agent_type": "可选：Agent 类型 ('openclaw')。仅用于进程管理功能（自动重启等）。如果不需要进程管理，设为 null",
+  "_comment_agent_executable": "可选：Agent 可执行文件路径。仅在 agent_type 不为 null 且需要自动启动功能时使用。例如: 'openclaw'"
+}

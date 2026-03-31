@@ -1,0 +1,42 @@
+# 数据文件夹 - 包含用户提交记录等敏感信息
+data/
+
+# 预测文件夹 - 包含完整的 AI 预测分析结果
+predictions/
+
+# 调试文件夹 - 包含 prompt 和响应的调试信息
+debug/
+
+# 配置文件 - 包含 API Key 等敏感信息
+config.json
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 虚拟环境
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 日志文件
+*.log
+
+# 临时文件
+*.tmp
+*.bak
+*~
+
+# 打包输出
+dist/
+build/
+*.egg-info/

@@ -1,0 +1,101 @@
+# ============================================================================
+# OpenClaw AgentOracle Plugin - Requirements
+# ============================================================================
+# Python Version: 3.9+
+# 
+# This file lists all external dependencies required for the OpenClaw 
+# AgentOracle plugin. The plugin enables AI agents running on OpenClaw to 
+# participate in the AgentOracle prediction market platform.
+#
+# Installation: pip install -r requirements.txt
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Core Dependencies (Runtime)
+# ----------------------------------------------------------------------------
+
+# HTTP Communication
+# Used by: api_client.py
+# Purpose: HTTP client for communicating with AgentOracle API endpoints
+#          Includes connection pooling, retry logic, and session management
+requests>=2.31.0,<3.0.0
+
+# WebSocket Communication
+# Used by: websocket_client.py
+# Purpose: WebSocket client for communicating with OpenClaw Gateway (Protocol v3)
+#          Provides async WebSocket support with automatic reconnection
+websockets>=12.0,<13.0
+
+# HTTP Connection Retry Support
+# Used by: api_client.py (via requests.adapters.HTTPAdapter)
+# Purpose: Provides automatic retry logic with exponential backoff for
+#          failed HTTP requests, improving resilience against network issues
+# Note: Installed automatically as a dependency of requests, but explicitly
+#       listed here for version control and security updates
+urllib3>=2.0.0,<3.0.0
+
+# ----------------------------------------------------------------------------
+# Security Dependencies
+# ----------------------------------------------------------------------------
+
+# JSON Schema Validation
+# Used by: api_client.py
+# Purpose: Validates incoming task JSON against defined schemas to prevent
+#          injection attacks, malformed data, and ensure data integrity
+jsonschema>=4.20.0
+
+# ----------------------------------------------------------------------------
+# System Monitoring Dependencies
+# ----------------------------------------------------------------------------
+
+# Process and System Monitoring
+# Used by: memory_monitor.py, telemetry.py
+# Purpose: Monitors memory usage, collects system statistics for telemetry
+#          Provides cross-platform access to system and process information
+psutil>=5.9.0
+
+# ----------------------------------------------------------------------------
+# User Interface Dependencies
+# ----------------------------------------------------------------------------
+
+# Colored Terminal Output
+# Used by: logger.py
+# Purpose: Provides colored console output for better log readability
+#          Enables cross-platform colored text in terminal (Windows/Unix)
+colorama>=0.4.6
+
+# System Tray Icon Support
+# Used by: gui_tray.py
+# Purpose: Creates system tray icons for Windows/Mac/Linux
+#          Lightweight alternative to full GUI frameworks
+pystray>=0.19.0
+
+# Image Processing for Tray Icons
+# Used by: gui_tray.py (via pystray)
+# Purpose: Creates and manipulates icon images for system tray
+#          Required by pystray for icon generation
+Pillow>=10.0.0
+
+# ----------------------------------------------------------------------------
+# Development and Testing Dependencies
+# ----------------------------------------------------------------------------
+
+# Property-Based Testing Framework
+# Used by: test_*.py files (when property tests are implemented)
+# Purpose: Generates random test cases to verify correctness properties
+#          Helps discover edge cases and ensures robust implementations
+# Note: Required for running property-based tests defined in the design doc
+hypothesis>=6.92.0
+
+# Unit Testing Framework
+# Used by: test_*.py files
+# Purpose: Standard Python testing framework for unit and integration tests
+#          Provides test discovery, fixtures, and assertion utilities
+# Note: Usually included with Python, but specified for version consistency
+pytest>=7.4.0
+
+# Test Coverage Reporting
+# Used by: CI/CD pipeline and local testing
+# Purpose: Measures code coverage during test execution
+#          Generates HTML and terminal coverage reports
+pytest-cov>=4.1.0

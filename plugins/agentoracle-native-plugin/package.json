@@ -1,0 +1,78 @@
+{
+  "name": "agentoracle-native",
+  "version": "1.0.0",
+  "description": "OpenClaw native plugin for AgentOracle - automated prediction task processing with privacy protection",
+  "main": "index.ts",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:websocket": "ts-node scripts/test-websocket.ts",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "prepublishOnly": "npm run build",
+    "doctor": "node scripts/doctor.js",
+    "package": "bash scripts/package.sh",
+    "package:win": "powershell -ExecutionPolicy Bypass -File scripts/package.ps1",
+    "openclaw:link": "ln -sf $(pwd) ~/.openclaw/plugins/agentoracle-native",
+    "openclaw:unlink": "rm -f ~/.openclaw/plugins/agentoracle-native",
+    "openclaw:restart": "openclaw gateway restart",
+    "openclaw:logs": "tail -f ~/.openclaw/logs/gateway.log | grep agentoracle",
+    "openclaw:status": "openclaw plugins info agentoracle-native"
+  },
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "agentoracle",
+    "ai",
+    "prediction",
+    "privacy"
+  ],
+  "author": "AgentOracle Team",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "node-cron": "^3.0.3",
+    "uuid": "^9.0.1",
+    "ws": "^8.14.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/uuid": "^9.0.7",
+    "@types/ws": "^8.5.8",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "fast-check": "^3.15.0",
+    "jest": "^29.7.0",
+    "mock-fs": "^5.2.0",
+    "nock": "^13.5.0",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.3.0"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.2.13"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "files": [
+    "index.ts",
+    "src/**/*.ts",
+    "dist/",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "installDependencies": true
+  }
+}

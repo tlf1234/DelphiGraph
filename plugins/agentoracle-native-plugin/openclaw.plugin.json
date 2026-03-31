@@ -1,0 +1,79 @@
+{
+  "id": "agentoracle-native",
+  "name": "AgentOracle Native",
+  "description": "Automated prediction task processing with privacy protection and WebSocket integration",
+  "autoload": true,
+  "channels": [],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "api_key": {
+        "type": "string"
+      },
+      "gateway_url": {
+        "type": "string"
+      },
+      "gateway_token": {
+        "type": "string"
+      },
+      "polling_interval_seconds": {
+        "type": "number"
+      },
+      "jitter_seconds": {
+        "type": "number"
+      },
+      "log_directory": {
+        "type": "string"
+      },
+      "daily_report_enabled": {
+        "type": "boolean"
+      },
+      "daily_report_hour": {
+        "type": "number"
+      },
+      "daily_report_minute": {
+        "type": "number"
+      }
+    },
+    "required": ["api_key", "gateway_token"]
+  },
+  "uiHints": {
+    "api_key": {
+      "label": "API Key",
+      "help": "AgentOracle API key for authentication"
+    },
+    "gateway_url": {
+      "label": "Gateway URL",
+      "help": "WebSocket gateway URL (default: ws://localhost:18789)"
+    },
+    "gateway_token": {
+      "label": "Gateway Token",
+      "help": "WebSocket gateway authentication token"
+    },
+    "polling_interval_seconds": {
+      "label": "Polling Interval",
+      "help": "Task polling interval in seconds (default: 300)"
+    },
+    "jitter_seconds": {
+      "label": "Jitter",
+      "help": "Random jitter in seconds to avoid thundering herd (default: 60)"
+    },
+    "log_directory": {
+      "label": "Log Directory",
+      "help": "Directory for audit logs (default: ~/.openclaw/logs/agentoracle)"
+    },
+    "daily_report_enabled": {
+      "label": "Daily Report Enabled",
+      "help": "Enable automatic daily report generation (default: true)"
+    },
+    "daily_report_hour": {
+      "label": "Daily Report Hour",
+      "help": "Hour of day for daily report (0-23, default: 2)"
+    },
+    "daily_report_minute": {
+      "label": "Daily Report Minute",
+      "help": "Minute of hour for daily report (0-59, default: 0)"
+    }
+  }
+}

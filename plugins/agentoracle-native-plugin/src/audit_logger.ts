@@ -1,0 +1,167 @@
+import { promises as fs } from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { LogEntry } from './types';
+
+/**
+ * 提交数据日志条目
+ * 记录发送到 AgentOracle 平台的完整数据
+ */
+export interface SubmissionLogEntry {
+  timestamp: string;
+  taskId: string;
+  taskQuestion: string;
+  taskContext?: string;
+  aiResponse: string;
+  sanitizedPrediction: string;
+  submittedData: Record<string, unknown>;
+}
+
+/**
+ * AuditLogger 类
+ * 将脱敏前后的数据对比记录到本地文件，供用户审计
+ */
+export class AuditLogger {
+  private readonly logDir: string;
+  private readonly auditFile: string;
+  private readonly submissionFile: string;
+
+  constructor(logDirectory: string = '~/.openclaw/agentoracle_logs/') {
+    // 处理 ~ 符号
+    if (logDirectory.startsWith('~')) {
+      logDirectory = path.join(os.homedir(), logDirectory.slice(1));
+    }
+
+    this.logDir = path.resolve(logDirectory);
+    this.auditFile = path.join(this.logDir, 'audit.md');
+    this.submissionFile = path.join(this.logDir, 'submissions.md');
+  }
+
+  /**
+   * 记录审计日志（脱敏前后对比）
+   * @param entry 日志条目
+   */
+  async log(entry: LogEntry): Promise<void> {
+    try {
+      // 确保日志目录存在
+      await this.ensureLogDirectory();
+
+      // 格式化日志条目
+      const formattedEntry = this.formatEntry(entry);
+
+      // 追加写入日志文件
+      await fs.appendFile(this.auditFile, formattedEntry, 'utf-8');
+    } catch (error) {
+      // 日志写入失败不应阻塞主流程，仅记录错误
+      console.error('[agentoracle-native-plugin] Failed to write audit log:', error);
+    }
+  }
+
+  /**
+   * 记录提交数据日志（发送到平台的完整数据）
+   * @param entry 提交日志条目
+   */
+  async logSubmission(entry: SubmissionLogEntry): Promise<void> {
+    try {
+      // 确保日志目录存在
+      await this.ensureLogDirectory();
+
+      // 格式化提交日志条目
+      const formattedEntry = this.formatSubmissionEntry(entry);
+
+      // 追加写入提交日志文件
+      await fs.appendFile(this.submissionFile, formattedEntry, 'utf-8');
+    } catch (error) {
+      // 日志写入失败不应阻塞主流程，仅记录错误
+      console.error('[agentoracle-native-plugin] Failed to write submission log:', error);
+    }
+  }
+
+  /**
+   * 确保日志目录存在
+   */
+  private async ensureLogDirectory(): Promise<void> {
+    try {
+      await fs.mkdir(this.logDir, { recursive: true });
+    } catch (error) {
+      // 目录创建失败
+      throw new Error(`Failed to create log directory: ${this.logDir}`);
+    }
+  }
+
+  /**
+   * 格式化日志条目为 Markdown
+   * @param entry 日志条目
+   * @returns 格式化后的 Markdown 字符串
+   */
+  private formatEntry(entry: LogEntry): string {
+    return `
+---
+
+📅 **时间**: ${entry.timestamp}
+🆔 **任务ID**: ${entry.taskId}
+
+⚠️ **原始数据** (脱敏前):
+\`\`\`json
+${entry.original}
+\`\`\`
+
+🛡️ **脱敏数据** (已上传):
+\`\`\`json
+${entry.sanitized}
+\`\`\`
+
+---
+`;
+  }
+
+  /**
+   * 格式化提交日志条目为 Markdown
+   * @param entry 提交日志条目
+   * @returns 格式化后的 Markdown 字符串
+   */
+  private formatSubmissionEntry(entry: SubmissionLogEntry): string {
+    return `
+---
+
+## 📤 数据提交记录
+
+📅 **提交时间**: ${entry.timestamp}
+🆔 **任务ID**: ${entry.taskId}
+
+### 📋 任务信息
+
+**问题**:
+\`\`\`
+${entry.taskQuestion}
+\`\`\`
+
+${entry.taskContext ? `**背景信息**:
+\`\`\`
+${entry.taskContext}
+\`\`\`
+` : ''}
+
+### 🤖 AI 完整响应
+
+\`\`\`
+${entry.aiResponse}
+\`\`\`
+
+### 🛡️ 脱敏后的预测结果
+
+\`\`\`
+${entry.sanitizedPrediction}
+\`\`\`
+
+### 📤 实际提交到平台的数据
+
+\`\`\`json
+${JSON.stringify(entry.submittedData, null, 2)}
+\`\`\`
+
+---
+
+`;
+  }
+}
