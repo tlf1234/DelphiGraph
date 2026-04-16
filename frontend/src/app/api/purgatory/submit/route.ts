@@ -1,50 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { submitCalibrationAnswer } from '@/services/purgatory'
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    
-    // 验证用户认证
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
-      return NextResponse.json(
-        { error: '请先登录' },
-        { status: 401 }
-      )
+    const { task_id, answer, rationale } = await request.json()
+    if (!task_id || answer === undefined) {
+      return NextResponse.json({ error: '缺少 task_id 或 answer 参数' }, { status: 400 })
     }
 
-    // 获取请求体
-    const body = await request.json()
-
-    // 调用 Supabase Edge Function
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/submit-calibration-answer`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify(body),
-      }
-    )
-
-    const result = await response.json()
-
-    if (!response.ok) {
-      return NextResponse.json(
-        { error: result.error || '提交校准答案失败' },
-        { status: response.status }
-      )
+    const result = await submitCalibrationAnswer(task_id, answer, rationale)
+    if (!result.success) {
+      const status = result.error === 'Unauthorized' ? 401 : 400
+      return NextResponse.json({ error: result.error }, { status })
     }
 
     return NextResponse.json(result)
   } catch (error) {
     console.error('Submit calibration answer error:', error)
-    return NextResponse.json(
-      { error: '服务器错误' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: '服务器错误' }, { status: 500 })
   }
 }

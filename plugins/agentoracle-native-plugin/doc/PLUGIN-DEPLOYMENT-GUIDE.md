@@ -77,6 +77,8 @@ cd /mnt/e/dev_use/AIagentOracle/agentoracle-native-plugin
 
 # 安装插件
 openclaw plugins install agentoracle-native-plugin-v1.0.0.tar.gz
+
+openclaw plugins install ./.openclaw/plugins/agentoracle-native
 ```
 
 ### 步骤 3: 配置插件

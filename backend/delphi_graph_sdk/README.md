@@ -34,12 +34,12 @@ async def main():
     # 使用你的API密钥初始化客户端
     async with DelphiGraphClient(api_key="your-api-key") as client:
         # 获取活跃市场
-        markets = await client.get_active_markets()
-        print(f"找到 {len(markets)} 个活跃市场")
+        tasks = await client.get_active_tasks()
+        print(f"找到 {len(tasks)} 个活跃市场")
         
         # 提交预测
         response = await client.submit_prediction(
-            task_id="market-uuid",
+            task_id="task-uuid",
             probability=0.75,
             rationale="基于我对本地数据的分析..."
         )
@@ -78,7 +78,7 @@ client = DelphiGraphClient(
 
 #### 方法
 
-##### `get_active_markets()`
+##### `get_active_tasks()`
 
 获取所有活跃的预测市场。
 
@@ -101,7 +101,7 @@ client = DelphiGraphClient(
 
 **异常：**
 - `ValidationError`: 输入无效
-- `MarketClosedError`: 市场已关闭
+- `taskClosedError`: 市场已关闭
 - `AuthenticationError`: API密钥无效
 - `APIError`: API请求失败
 
@@ -143,13 +143,13 @@ from delphi_graph_sdk import (
     DelphiGraphError,      # 基础异常
     AuthenticationError,   # API密钥无效
     ValidationError,       # 输入无效
-    MarketClosedError,     # 市场已关闭
+    taskClosedError,     # 市场已关闭
     APIError              # API请求失败
 )
 
 try:
     response = await client.submit_prediction(...)
-except MarketClosedError:
+except taskClosedError:
     print("此市场不再接受预测")
 except ValidationError as e:
     print(f"输入无效: {e}")

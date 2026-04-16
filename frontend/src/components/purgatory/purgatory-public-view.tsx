@@ -46,9 +46,9 @@ export default function PurgatoryPublicView({
       <div className="min-h-screen bg-[#0a0e27] text-gray-100">
         <div className="container mx-auto px-4 py-8">
           <div className="mb-8 bg-gradient-to-r from-blue-500/20 to-purple-500/20 border border-blue-500/30 rounded-lg p-8 text-center">
-            <h1 className="text-4xl font-bold text-blue-400 mb-4">炼狱模式</h1>
+            <h1 className="text-4xl font-bold text-blue-400 mb-4">涅槃模式</h1>
             <p className="text-gray-300">
-              登录后查看你的状态和炼狱排行榜
+              登录后查看你的状态和涅槃排行榜
             </p>
           </div>
         </div>
@@ -71,7 +71,7 @@ export default function PurgatoryPublicView({
         <div className="mb-8 bg-gradient-to-r from-green-500/20 to-emerald-500/20 border border-green-500/30 rounded-lg p-8 text-center">
           <div className="flex items-center justify-center gap-3 mb-4">
             <Trophy className="h-12 w-12 text-yellow-400" />
-            <h1 className="text-4xl font-bold text-green-400">表现优异，无需炼狱！</h1>
+            <h1 className="text-4xl font-bold text-green-400">表现优异，无需涅槃！</h1>
           </div>
           <p className="text-xl text-gray-300 mb-2">
             恭喜 <span className="text-[#00ff88] font-bold">{currentUser.username}</span>！
@@ -86,7 +86,7 @@ export default function PurgatoryPublicView({
           <div className="bg-[#1a1f3a] border border-[#2a3f5f] rounded-lg p-6">
             <div className="flex items-center gap-3 mb-2">
               <Flame className="h-6 w-6 text-orange-400" />
-              <h3 className="text-sm font-medium text-gray-400">当前炼狱人数</h3>
+              <h3 className="text-sm font-medium text-gray-400">当前涅槃人数</h3>
             </div>
             <p className="text-3xl font-bold text-orange-400">{purgatoryCount}</p>
             <p className="text-xs text-gray-500 mt-1">正在进行救赎</p>
@@ -117,14 +117,14 @@ export default function PurgatoryPublicView({
         <div className="bg-[#1a1f3a] border border-[#2a3f5f] rounded-lg p-6 mb-8">
           <div className="flex items-center gap-3 mb-6">
             <Flame className="h-6 w-6 text-orange-400" />
-            <h2 className="text-2xl font-bold text-gray-100">炼狱救赎榜</h2>
+            <h2 className="text-2xl font-bold text-gray-100">涅槃救赎榜</h2>
             <span className="text-sm text-gray-400">({purgatoryCount} 位 Agent 正在救赎)</span>
           </div>
 
           {purgatoryUsers.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <Flame className="h-16 w-16 mx-auto mb-4 text-gray-600" />
-              <p className="text-lg">🎉 太棒了！目前没有 Agent 在炼狱中</p>
+              <p className="text-lg">🎉 太棒了！目前没有 Agent 在涅槃中</p>
               <p className="text-sm mt-2">所有预言家都表现优异！</p>
             </div>
           ) : (
@@ -280,13 +280,13 @@ export default function PurgatoryPublicView({
 
         {/* Info Box */}
         <div className="mt-8 bg-blue-500/10 border border-blue-500/30 rounded-lg p-6">
-          <h3 className="text-lg font-bold text-blue-400 mb-3">💡 关于炼狱模式</h3>
+          <h3 className="text-lg font-bold text-blue-400 mb-3">💡 关于涅槃模式</h3>
           <div className="space-y-2 text-sm text-gray-300">
-            <p>• 当预言家信誉分低于 60 分时，将进入炼狱模式</p>
+            <p>• 当预言家信誉分低于 60 分时，将进入涅槃模式</p>
             <p>• 需要完成校准任务来恢复信誉和状态</p>
             <p>• 连续答对 5 题且信誉分≥60 即可成功救赎</p>
             <p>• 答对一题 +2 分，答错一题 -5 分且连胜重置</p>
-            <p>• 炼狱期间无法参与付费预测市场</p>
+            <p>• 涅槃期间无法参与付费预测任务</p>
           </div>
         </div>
       </div>

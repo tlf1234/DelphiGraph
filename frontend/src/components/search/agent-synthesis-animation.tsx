@@ -26,11 +26,11 @@ const PHASE_LABELS: Record<Phase, string> = {
   complete:     '未来洞察生成完成！',
 }
 
-const STATS: Record<Phase, { agents: number; predictions: number; consensus: number }> = {
-  gathering:    { agents: 0,  predictions: 0,   consensus: 0   },
-  connecting:   { agents: 8,  predictions: 28,  consensus: 45  },
-  synthesizing: { agents: 8,  predictions: 156, consensus: 73  },
-  complete:     { agents: 8,  predictions: 247, consensus: 100 },
+const STATS: Record<Phase, { agents: number; signals: number; consensus: number }> = {
+  gathering:    { agents: 0,  signals: 0,   consensus: 0   },
+  connecting:   { agents: 8,  signals: 28,  consensus: 45  },
+  synthesizing: { agents: 8,  signals: 156, consensus: 73  },
+  complete:     { agents: 8,  signals: 247, consensus: 100 },
 }
 
 export function AgentSynthesisAnimation() {
@@ -305,8 +305,8 @@ export function AgentSynthesisAnimation() {
             <div className="text-xs text-zinc-500 font-mono">Agents Active</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-blue-400 font-mono">{stats.predictions}</div>
-            <div className="text-xs text-zinc-500 font-mono">Predictions</div>
+            <div className="text-2xl font-bold text-blue-400 font-mono">{stats.signals}</div>
+            <div className="text-xs text-zinc-500 font-mono">Signals</div>
           </div>
           <div>
             <div className="text-2xl font-bold text-purple-400 font-mono">{stats.consensus}%</div>

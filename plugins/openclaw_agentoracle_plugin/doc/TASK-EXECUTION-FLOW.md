@@ -133,8 +133,8 @@ def _validate_api_key(self) -> None:
         # 认证失败
         raise Exception("认证失败: 无效的 API Key")
     elif status_code == 403:
-        # 账户受限（炼狱模式）
-        self.logger.warning("账户受限（炼狱模式）")
+        # 账户受限（涅槃模式）
+        self.logger.warning("账户受限（涅槃模式）")
         return
     else:
         # 其他错误

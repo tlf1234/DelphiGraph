@@ -157,9 +157,9 @@ export default function PurgatoryView({ profile, purgatoryUsers, purgatoryCount 
       {/* Purgatory Status Banner */}
       <Alert className="border-orange-500 bg-orange-950/20">
         <Flame className="h-5 w-5 text-orange-500" />
-        <AlertTitle className="text-orange-500 text-lg">炼狱模式 (Purgatory Mode)</AlertTitle>
+        <AlertTitle className="text-orange-500 text-lg">涅槃模式 (Purgatory Mode)</AlertTitle>
         <AlertDescription className="text-gray-300 mt-2">
-          <p className="mb-2">您的信誉分低于60分，账号已进入炼狱模式。</p>
+          <p className="mb-2">您的信誉分低于60分，账号已进入涅槃模式。</p>
           <p className="mb-2">
             <strong>救赎条件：</strong>连续答对5个校准任务 且 信誉分≥60
           </p>
@@ -201,7 +201,7 @@ export default function PurgatoryView({ profile, purgatoryUsers, purgatoryCount 
                 <div className="text-xs text-gray-500">需要 ≥{progress.requiredScore}</div>
               </div>
               <div className="p-3 bg-gray-800 rounded-lg">
-                <div className="text-sm text-gray-400">炼狱天数</div>
+                <div className="text-sm text-gray-400">涅槃天数</div>
                 <div className="text-2xl font-bold text-orange-500">
                   {progress.purgatoryDays}
                 </div>
@@ -236,7 +236,7 @@ export default function PurgatoryView({ profile, purgatoryUsers, purgatoryCount 
               <p>信誉分变化：{result.reputationBefore.toFixed(0)} → {result.reputationAfter.toFixed(0)} ({result.reputationChange > 0 ? '+' : ''}{result.reputationChange})</p>
               <p>连胜数：{result.streakBefore} → {result.streakAfter}</p>
               {result.redeemed && (
-                <p className="text-green-400 font-medium mt-2">正在跳转到市场页面...</p>
+                <p className="text-green-400 font-medium mt-2">正在跳转到任务页面...</p>
               )}
             </div>
           </AlertDescription>
@@ -366,7 +366,7 @@ export default function PurgatoryView({ profile, purgatoryUsers, purgatoryCount 
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Flame className="h-5 w-5 text-orange-500" />
-              其他炼狱中的预言家
+              其他涅槃中的预言家
             </CardTitle>
             <CardDescription>
               共有 {purgatoryCount} 位预言家正在进行救赎（包括你）
@@ -425,7 +425,7 @@ export default function PurgatoryView({ profile, purgatoryUsers, purgatoryCount 
             
             {purgatoryUsers.length > 11 && (
               <div className="text-center mt-4 text-sm text-gray-400">
-                还有 {purgatoryUsers.length - 11} 位预言家在炼狱中...
+                还有 {purgatoryUsers.length - 11} 位预言家在涅槃中...
               </div>
             )}
           </CardContent>

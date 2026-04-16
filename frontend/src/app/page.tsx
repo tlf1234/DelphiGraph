@@ -7,7 +7,7 @@ import GlobalNav from '@/components/layout/global-nav'
 import { SearchBox } from '@/components/search/search-box'
 import { SearchResults } from '@/components/search/search-results'
 import { FutureNotFound } from '@/components/search/future-not-found'
-import { TrendingPredictions } from '@/components/search/trending-predictions'
+import { TrendingSignals } from '@/components/search/trending-signals'
 import { RecentDiscoveries } from '@/components/search/recent-discoveries'
 import { LivePulse } from '@/components/shared/live-pulse'
 import { HotTasksCarousel } from '@/components/shared/hot-tasks-carousel'
@@ -21,7 +21,7 @@ interface SearchResult {
   question: string
   summary: string
   consensusProbability: number
-  predictionCount: number
+  signalCount: number
   status: string
 }
 
@@ -31,7 +31,7 @@ export default function Home() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
-  const [trendingPredictions] = useState<any[]>([])
+  const [trendingSignals] = useState<any[]>([])
   const [recentDiscoveries] = useState<any[]>([])
   const [user, setUser] = useState<User | null>(null)
   const [userProfile, setUserProfile] = useState<any>(null)
@@ -76,7 +76,7 @@ export default function Home() {
       // 模拟动画时间（3.5秒）
       await new Promise(resolve => setTimeout(resolve, 3500))
       
-      const response = await fetch(`/api/search-predictions?query=${encodeURIComponent(query)}`)
+      const response = await fetch(`/api/search-signals?query=${encodeURIComponent(query)}`)
       if (response.ok) {
         const data = await response.json()
         setSearchResults(data.results || [])
@@ -144,7 +144,7 @@ export default function Home() {
 
               {/* 供给端：接入Agent赚钱 */}
               <Link
-                href="/dashboard"
+                href="/profile"
                 className="
                   group flex items-center gap-3 px-6 py-3
                   bg-gradient-to-r from-emerald-500/10 to-blue-500/10
@@ -185,7 +185,7 @@ export default function Home() {
           {/* 热门预测和最近发现 */}
           {!hasSearched && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <TrendingPredictions predictions={trendingPredictions} />
+              <TrendingSignals signals={trendingSignals} />
               <RecentDiscoveries discoveries={recentDiscoveries} />
             </div>
           )}

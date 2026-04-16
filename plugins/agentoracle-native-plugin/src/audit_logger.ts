@@ -5,7 +5,8 @@ import { LogEntry } from './types';
 
 /**
  * 提交数据日志条目
- * 记录发送到 AgentOracle 平台的完整数据
+ * 记录发送到 AgentOracle 平台的完整 UAP v3.0 payload
+ * （与 openclaw_agentoracle_plugin/src/submission_logger.py 对齐）
  */
 export interface SubmissionLogEntry {
   timestamp: string;
@@ -13,8 +14,13 @@ export interface SubmissionLogEntry {
   taskQuestion: string;
   taskContext?: string;
   aiResponse: string;
-  sanitizedPrediction: string;
-  submittedData: Record<string, unknown>;
+  sanitizedResponse: string;
+  /** 未脱敏的 UAP v3.0 payload（用于对比） */
+  originalPayload?: Record<string, unknown>;
+  /** 实际发送给平台的脱敏 UAP v3.0 payload */
+  sanitizedPayload?: Record<string, unknown>;
+  /** 向后兼容：旧字段，优先使用 sanitizedPayload */
+  submittedData?: Record<string, unknown>;
 }
 
 /**
@@ -116,18 +122,26 @@ ${entry.sanitized}
   }
 
   /**
-   * 格式化提交日志条目为 Markdown
+   * 格式化提交日志条目为 Markdown（UAP v3.0）
+   * 输出：任务信息 + AI 原始响应 + 脱敏后响应 + 两份 UAP payload 对比 + Raw JSON
    * @param entry 提交日志条目
    * @returns 格式化后的 Markdown 字符串
    */
   private formatSubmissionEntry(entry: SubmissionLogEntry): string {
+    // 兼容旧字段名：优先使用 sanitizedPayload，fallback 到 submittedData
+    const sanitizedPayload = entry.sanitizedPayload ?? entry.submittedData ?? {};
+    const originalPayload = entry.originalPayload;
+    
     return `
 ---
 
-## 📤 数据提交记录
+## 📤 UAP v3.0 数据提交记录
 
 📅 **提交时间**: ${entry.timestamp}
 🆔 **任务ID**: ${entry.taskId}
+📋 **协议版本**: UAP v${(sanitizedPayload as { protocol_version?: string }).protocol_version ?? '3.0'}
+🏷️ **提交状态**: ${(sanitizedPayload as { status?: string }).status ?? 'N/A'}
+📊 **信号数量**: ${((sanitizedPayload as { signals?: unknown[] }).signals ?? []).length}
 
 ### 📋 任务信息
 
@@ -148,16 +162,22 @@ ${entry.taskContext}
 ${entry.aiResponse}
 \`\`\`
 
-### 🛡️ 脱敏后的预测结果
+### 🛡️ 脱敏后的 AI 响应
 
 \`\`\`
-${entry.sanitizedPrediction}
+${entry.sanitizedResponse}
 \`\`\`
-
-### 📤 实际提交到平台的数据
+${originalPayload ? `
+### ⚠️ 原始 UAP v3.0 Payload（脱敏前，用于对比）
 
 \`\`\`json
-${JSON.stringify(entry.submittedData, null, 2)}
+${JSON.stringify(originalPayload, null, 2)}
+\`\`\`
+` : ''}
+### 📤 实际提交的 UAP v3.0 Payload（脱敏后）
+
+\`\`\`json
+${JSON.stringify(sanitizedPayload, null, 2)}
 \`\`\`
 
 ---

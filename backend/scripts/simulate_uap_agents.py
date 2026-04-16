@@ -2,14 +2,14 @@
 """
 UAP Agent Simulation Script
 ============================
-Creates 100+ simulated agent prediction data points and uploads them to
+Creates 100+ simulated agent signal submission data points and uploads them to
 the database via the actual Next.js API endpoints, in batches of 10
 every 5 seconds.
 
 Usage:
     python simulate_uap_agents.py --task-id <UUID> [--frontend-url http://localhost:3000]
-    python simulate_uap_agents.py --list-tasks           # List active markets
-    python simulate_uap_agents.py --cleanup              # Delete sim agents/predictions
+    python simulate_uap_agents.py --list-tasks           # List active tasks
+    python simulate_uap_agents.py --cleanup              # Delete sim agents/submissions
 
 Requirements:
     pip install httpx python-dotenv
@@ -46,7 +46,7 @@ FRONTEND_URL = os.environ.get("NEXT_PUBLIC_APP_URL", "http://localhost:3000")
 SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
-TOTAL_BATCHES = 10          # 10 batches × 10 per batch = 100 predictions
+TOTAL_BATCHES = 10          # 10 batches × 10 per batch = 100 submissions
 BATCH_SIZE = 10
 BATCH_INTERVAL_SECS = 5     # seconds between batches
 ANALYSIS_TRIGGER_BATCH = 1  # trigger analysis after this batch index
@@ -88,7 +88,7 @@ async def upload_batch(
     batch_index: int,
     agents: list[dict],
 ) -> dict | None:
-    """Upload a batch of 10 predictions."""
+    """Upload a batch of 10 signal submissions."""
     try:
         r = await client.post(
             f"{FRONTEND_URL}/api/test/upload-batch",
@@ -175,15 +175,15 @@ async def poll_analysis(client: httpx.AsyncClient, task_id: str, max_wait_secs: 
     return False
 
 
-async def list_active_markets(client: httpx.AsyncClient) -> None:
-    """List active markets using Supabase REST API."""
+async def list_active_tasks(client: httpx.AsyncClient) -> None:
+    """List active tasks using Supabase REST API."""
     if not SUPABASE_URL or not SUPABASE_KEY:
         log("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set in environment", "ERR")
         return
 
     try:
         r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/markets",
+            f"{SUPABASE_URL}/rest/v1/prediction_tasks",
             params={"status": "eq.active", "select": "id,title,question,status,closes_at", "limit": "20"},
             headers={
                 "apikey": SUPABASE_KEY,
@@ -192,23 +192,23 @@ async def list_active_markets(client: httpx.AsyncClient) -> None:
             timeout=15.0,
         )
         r.raise_for_status()
-        markets = r.json()
-        if not markets:
-            log("No active markets found", "WARN")
+        tasks = r.json()
+        if not tasks:
+            log("No active tasks found", "WARN")
             return
         print(f"\n{'ID':<38} {'CLOSES':<12} TITLE")
         print("-" * 90)
-        for m in markets:
+        for m in tasks:
             closes = m.get("closes_at", "")[:10]
             title = (m.get("title") or m.get("question", ""))[:50]
             print(f"{m['id']}  {closes}  {title}")
         print()
     except Exception as e:
-        log(f"Failed to list markets: {e}", "ERR")
+        log(f"Failed to list tasks: {e}", "ERR")
 
 
 async def cleanup_sim_data(client: httpx.AsyncClient) -> None:
-    """Delete sim agent profiles + their predictions from Supabase."""
+    """Delete sim agent profiles + their signal submissions from Supabase."""
     if not SUPABASE_URL or not SUPABASE_KEY:
         log("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set in environment", "ERR")
         return
@@ -232,12 +232,12 @@ async def cleanup_sim_data(client: httpx.AsyncClient) -> None:
         return
 
     profile_ids = [p["id"] for p in profiles]
-    log(f"Found {len(profiles)} sim agent profiles, deleting predictions...", "INFO")
+    log(f"Found {len(profiles)} sim agent profiles, deleting signal_submissions...", "INFO")
 
-    # Delete predictions
+    # Delete signal submissions
     for pid in profile_ids:
         await client.delete(
-            f"{SUPABASE_URL}/rest/v1/predictions",
+            f"{SUPABASE_URL}/rest/v1/signal_submissions",
             params={"user_id": f"eq.{pid}"},
             headers=headers,
             timeout=15.0,
@@ -262,8 +262,8 @@ async def cleanup_sim_data(client: httpx.AsyncClient) -> None:
 
 async def run_simulation(task_id: str) -> None:
     log(f"=== UAP Agent Simulation ===", "SIM")
-    log(f"Target market: {task_id}", "INFO")
-    log(f"Plan: {TOTAL_BATCHES} batches × {BATCH_SIZE} agents = {TOTAL_BATCHES * BATCH_SIZE} predictions", "INFO")
+    log(f"Target task: {task_id}", "INFO")
+    log(f"Plan: {TOTAL_BATCHES} batches × {BATCH_SIZE} agents = {TOTAL_BATCHES * BATCH_SIZE} submissions", "INFO")
     log(f"Batch interval: {BATCH_INTERVAL_SECS}s | Analysis trigger: after batch {ANALYSIS_TRIGGER_BATCH + 1}", "INFO")
     print()
 
@@ -279,11 +279,11 @@ async def run_simulation(task_id: str) -> None:
         for batch_idx in range(TOTAL_BATCHES):
             start = batch_idx * BATCH_SIZE + 1
             end = start + BATCH_SIZE - 1
-            log(f"Uploading batch {batch_idx + 1}/{TOTAL_BATCHES} (predictions {start}-{end})...", "SIM")
+            log(f"Uploading batch {batch_idx + 1}/{TOTAL_BATCHES} (submissions {start}-{end})...", "SIM")
 
             result = await upload_batch(client, task_id, batch_idx, agents)
             if result:
-                total_uploaded = result.get("total_predictions", total_uploaded + BATCH_SIZE)
+                total_uploaded = result.get("total_submissions", total_uploaded + BATCH_SIZE)
                 log(f"  Batch {batch_idx + 1} inserted {result.get('inserted', 0)} | "
                     f"total in DB: {total_uploaded}", "OK")
             else:
@@ -301,13 +301,13 @@ async def run_simulation(task_id: str) -> None:
                 await asyncio.sleep(BATCH_INTERVAL_SECS)
 
         print()
-        log(f"All batches uploaded! Total predictions: {total_uploaded}", "OK")
+        log(f"All batches uploaded! Total submissions: {total_uploaded}", "OK")
 
         # Step 3: Poll for final result
         print()
         success = await poll_analysis(client, task_id, max_wait_secs=90)
         if success:
-            log("Simulation complete! Open the market page to see the causal graph.", "OK")
+            log("Simulation complete! Open the task page to see the causal graph.", "OK")
         else:
             log("Analysis not yet complete. Check the frontend for live updates.", "WARN")
 
@@ -316,11 +316,11 @@ async def run_simulation(task_id: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="UAP Agent Simulation - uploads 100 agent predictions in batches of 10 every 5s"
+        description="UAP Agent Simulation - uploads 100 agent signal submissions in batches of 10 every 5s"
     )
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--task-id", metavar="UUID", help="Market/task ID to simulate against")
-    group.add_argument("--list-tasks", action="store_true", help="List active markets and exit")
+    group.add_argument("--task-id", metavar="UUID", help="Task ID to simulate against")
+    group.add_argument("--list-tasks", action="store_true", help="List active tasks and exit")
     group.add_argument("--cleanup", action="store_true", help="Delete all sim agent data and exit")
 
     global FRONTEND_URL
@@ -340,7 +340,7 @@ def main():
 
 async def _list_and_exit():
     async with httpx.AsyncClient(follow_redirects=True) as client:
-        await list_active_markets(client)
+        await list_active_tasks(client)
 
 
 async def _cleanup_and_exit():

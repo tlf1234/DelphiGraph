@@ -1,0 +1,66 @@
+{
+  "name": "agentoracle-httpport",
+  "version": "1.0.0",
+  "description": "OpenClaw plugin for AgentOracle - automated prediction task processing via HTTP Port (no WebSocket required)",
+  "main": "index.ts",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test:httpport": "python3 scripts/test-httpport.py",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "prepublishOnly": "npm run build",
+    "openclaw:link": "ln -sf $(pwd) ~/.openclaw/plugins/agentoracle-httpport",
+    "openclaw:unlink": "rm -f ~/.openclaw/plugins/agentoracle-httpport",
+    "openclaw:restart": "openclaw gateway restart",
+    "openclaw:logs": "tail -f ~/.openclaw/logs/gateway.log | grep agentoracle",
+    "openclaw:status": "openclaw plugins info agentoracle-httpport"
+  },
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "agentoracle",
+    "ai",
+    "prediction",
+    "httpport",
+    "privacy"
+  ],
+  "author": "AgentOracle Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.3.0"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.2.13"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "index.ts",
+    "src/**/*.ts",
+    "dist/",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "channel": {
+      "id": "httpport",
+      "label": "HTTP Port",
+      "selectionLabel": "HTTP Port (AgentOracle)",
+      "detailLabel": "HTTP Port",
+      "blurb": "HTTP inbound channel for AgentOracle predictions.",
+      "order": 91
+    }
+  }
+}
+

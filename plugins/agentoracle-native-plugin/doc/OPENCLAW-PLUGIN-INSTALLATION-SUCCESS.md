@@ -115,6 +115,19 @@ openclaw plugins info agentoracle-native
 
 # 检查 Gateway 日志
 journalctl -u openclaw-gateway.service -f | grep -i agentoracle
+
+# 卸载插件（通过插件 ID）没什么用
+openclaw plugins uninstall agentoracle-native
+
+# 直接删除扩展目录
+rm -rf ~/.openclaw/extensions/agentoracle-native
+
+rm -rf ~/.openclaw/extensions/agentoracle-httpport
+#//关闭插件
+openclaw plugins disable agentoracle-native
+
+#打开插件
+openclaw plugins enable agentoracle-native
 ```
 
 ## 故障排查

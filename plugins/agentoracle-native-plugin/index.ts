@@ -1,5 +1,6 @@
 import type { OpenClawPluginApi } from 'openclaw/plugin-sdk';
 import * as pluginSdk from 'openclaw/plugin-sdk';
+import * as path from 'path';
 import { APIClient } from './src/api_client';
 import { WebSocketClient } from './src/websocket_client';
 import { Sanitizer } from './src/sanitizer';
@@ -35,7 +36,7 @@ interface GatewayMethodContext {
 const plugin: AgentOraclePluginModule = {
   id: 'agentoracle-native',
   name: 'AgentOracle Native',
-  description: 'Automated prediction task processing with privacy protection and WebSocket integration',
+  description: 'Automated signal analysis task processing with privacy protection and WebSocket integration',
   configSchema: pluginSdk.emptyPluginConfigSchema(),
 
   register(api: OpenClawPluginApi): void {
@@ -53,6 +54,7 @@ const plugin: AgentOraclePluginModule = {
       // 1. 加载配置
       const pluginConfig: PluginConfig = {
         apiKey: (rawConfig as any).api_key || '',
+        apiBaseUrl: (rawConfig as any).api_base_url || '',
         gatewayUrl: (rawConfig as any).gateway_url || 'ws://localhost:18789',
         gatewayToken: (rawConfig as any).gateway_token || '',
         pollingIntervalSeconds: (rawConfig as any).polling_interval_seconds ?? 180,
@@ -72,12 +74,16 @@ const plugin: AgentOraclePluginModule = {
         throw new ConfigError('gateway_token is required');
       }
 
+      if (!pluginConfig.apiBaseUrl) {
+        throw new ConfigError('api_base_url is required');
+      }
+
       logger.info('[agentoracle-native] Configuration loaded');
       logger.info(`[agentoracle-native] API Key: ${pluginConfig.apiKey.substring(0, 8)}...`);
       logger.info(`[agentoracle-native] Gateway URL: ${pluginConfig.gatewayUrl}`);
 
       // 2. 初始化所有模块
-      const apiClient = new APIClient(pluginConfig.apiKey);
+      const apiClient = new APIClient(pluginConfig.apiKey, pluginConfig.apiBaseUrl, logger);
       const sanitizer = new Sanitizer();
       const auditLogger = new AuditLogger(pluginConfig.logDirectory);
       const chatTools = new ChatTools(apiClient);
@@ -90,7 +96,8 @@ const plugin: AgentOraclePluginModule = {
         maxRetries: 3,
         retryDelayBase: 2,
         connectTimeout: 10,
-        messageTimeout: 20
+        messageTimeout: 20,
+        deviceIdentityFile: path.join(__dirname, 'device_identity.json')
       }, logger);
 
       logger.info('[agentoracle-native] WebSocket client initialized');
@@ -132,9 +139,11 @@ const plugin: AgentOraclePluginModule = {
         dailyReporter.start();
         logger.info('[agentoracle-native] DailyReporter started');
 
-        // 插件启动时发送一次启动报告
-        dailyReporter.sendStartupReport().catch((error) => {
-          logger.error('[agentoracle-native] Failed to send startup report', error as Error);
+        // 启动报告在验证测试通过后发送，避免并发 WebSocket 连接干扰验证
+        daemon.setOnVerificationSuccess(() => {
+          dailyReporter!.sendStartupReport().catch((error) => {
+            logger.error('[agentoracle-native] Failed to send startup report', error as Error);
+          });
         });
       } else {
         logger.info('[agentoracle-native] DailyReporter disabled in configuration');

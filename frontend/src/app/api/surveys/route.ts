@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     const creatorOnly = searchParams.get('mine') === 'true'
 
     let q = serviceSupabase()
-      .from('surveys')
+      .from('survey_tasks')
       .select('id, title, description, survey_type, status, response_count, target_agent_count, created_at, completed_at')
       .order('created_at', { ascending: false })
       .limit(50)
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
 
     // 创建调查主记录
     const { data: survey, error: surveyErr } = await supa
-      .from('surveys')
+      .from('survey_tasks')
       .insert({
         title:                  title.trim(),
         description:            description || null,

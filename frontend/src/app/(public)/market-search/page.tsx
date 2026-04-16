@@ -2,9 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { CrowdfundingProgress } from '@/components/markets/crowdfunding-progress'
+import { CrowdfundingProgress } from '@/components/tasks/crowdfunding-progress'
 import { Loader2, BarChart2, ClipboardList } from 'lucide-react'
 
 interface Task {
@@ -24,7 +23,7 @@ interface Task {
   min_reputation: number
   required_niche_tags: string[] | null
   target_agent_count: number | null
-  prediction_count?: number
+  signal_count?: number
 }
 
 interface Survey {
@@ -58,7 +57,7 @@ const SURVEY_STATUS_INFO: Record<string, { label: string; color: string }> = {
   archived:  { label: '已归档', color: 'text-zinc-500' },
 }
 
-export default function MarketSearchPage() {
+export default function TaskSearchPage() {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState('all')
   const [tasks, setTasks] = useState<Task[]>([])
@@ -80,32 +79,13 @@ export default function MarketSearchPage() {
 
   const loadAgentProfile = async () => {
     try {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      
-      if (user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('reputation_score, reputation_level, niche_tags')
-          .eq('id', user.id)
-          .single()
-        
-        if (profile) {
-          setAgentProfile(profile)
-          
-          // Calculate if user is Top 10%
-          const { data: allProfiles } = await supabase
-            .from('profiles')
-            .select('reputation_score')
-            .eq('status', 'active')
-            .order('reputation_score', { ascending: false })
-          
-          if (allProfiles && allProfiles.length > 0) {
-            const top10Index = Math.floor(allProfiles.length * 0.1)
-            const top10Threshold = allProfiles[top10Index]?.reputation_score || 0
-            setIsTopAgent(profile.reputation_score >= top10Threshold)
-          }
-        }
+      const res = await fetch('/api/market-search?type=profile')
+      if (!res.ok) return
+      const data = await res.json()
+      if (data.profile) {
+        const { isTopAgent, ...profile } = data.profile
+        setAgentProfile(profile)
+        setIsTopAgent(isTopAgent ?? false)
       }
     } catch (error) {
       console.error('Error loading agent profile:', error)
@@ -116,51 +96,29 @@ export default function MarketSearchPage() {
     console.log('[loadAll] start')
     try {
       setIsLoading(true)
-      const supabase = createClient()
 
-      // ── auth 状态 ──────────────────────────────────────────────────
-      const { data: { user } } = await supabase.auth.getUser()
-      console.log('[loadAll] auth user:', user ? `uid=${user.id}` : 'anonymous (null)')
-
-      // ── Load prediction tasks ──────────────────────────────────────
-      console.log('[loadAll] querying markets...')
-      const { data: markets, error: marketsError } = await supabase
-        .from('markets')
-        .select('*')
-        .in('status', ['active', 'pending'])
-        .order('created_at', { ascending: false })
-
-      if (marketsError) {
-        console.error('[loadAll] markets error:', marketsError.code, marketsError.message)
-        throw marketsError
+      // ── Load signal tasks ────────────────────────────────────────────────
+      console.log('[loadAll] querying tasks...')
+      const tasksRes = await fetch('/api/market-search?type=tasks')
+      if (!tasksRes.ok) {
+        const err = await tasksRes.json().catch(() => ({}))
+        console.error('[loadAll] tasks error:', err)
+        throw new Error(err.error || 'Failed to load tasks')
       }
-      console.log('[loadAll] markets rows:', markets?.length ?? 0)
+      const { tasks: taskData } = await tasksRes.json()
+      console.log('[loadAll] tasks rows:', taskData?.length ?? 0)
+      setTasks(taskData || [])
 
-      const tasksWithCounts = await Promise.all(
-        (markets || []).map(async (market) => {
-          const { count } = await supabase
-            .from('predictions')
-            .select('*', { count: 'exact', head: true })
-            .eq('task_id', market.id)
-          
-          return { ...market, prediction_count: count || 0 }
-        })
-      )
-      setTasks(tasksWithCounts)
-
-      // ── Load survey tasks ──────────────────────────────────────────
+      // ── Load survey tasks ────────────────────────────────────────────────
       console.log('[loadAll] querying surveys...')
-      const { data: surveyData, error: surveyError } = await supabase
-        .from('surveys')
-        .select('id, title, description, survey_type, status, response_count, target_agent_count, created_at')
-        .in('status', ['running', 'completed'])
-        .order('created_at', { ascending: false })
-
-      if (surveyError) {
-        console.error('[loadAll] surveys error:', surveyError.code, surveyError.message, surveyError)
-        throw surveyError
+      const surveysRes = await fetch('/api/market-search?type=surveys')
+      if (!surveysRes.ok) {
+        const err = await surveysRes.json().catch(() => ({}))
+        console.error('[loadAll] surveys error:', err)
+        throw new Error(err.error || 'Failed to load surveys')
       }
-      console.log('[loadAll] surveys rows:', surveyData?.length ?? 0, surveyData)
+      const { surveys: surveyData } = await surveysRes.json()
+      console.log('[loadAll] surveys rows:', surveyData?.length ?? 0)
       setSurveys(surveyData || [])
 
       console.log('[loadAll] done ✓')
@@ -175,7 +133,7 @@ export default function MarketSearchPage() {
     const canPrivate = !!(agentProfile && (agentProfile.reputation_score >= 500 || isTopAgent))
 
     switch (activeTab) {
-      case 'prediction':
+      case 'signal':
         setFilteredTasks(tasks.filter(t =>
           t.visibility !== 'private' || canPrivate
         ))
@@ -207,7 +165,7 @@ export default function MarketSearchPage() {
   return (
     <div className="container mx-auto py-8 px-4">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">搜索市场</h1>
+        <h1 className="text-3xl font-bold mb-2">搜索任务</h1>
         <p className="text-zinc-400">
           浏览所有开放的预测任务与调查任务 - 根据您的信誉和专业领域匹配最适合的任务
         </p>
@@ -216,9 +174,9 @@ export default function MarketSearchPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-5 mb-8">
           <TabsTrigger value="all">全部任务</TabsTrigger>
-          <TabsTrigger value="prediction" className="flex items-center gap-1.5">
+          <TabsTrigger value="signal" className="flex items-center gap-1.5">
             <BarChart2 className="w-3.5 h-3.5" />
-            预测任务
+            信号任务
           </TabsTrigger>
           <TabsTrigger value="survey" className="flex items-center gap-1.5">
             <ClipboardList className="w-3.5 h-3.5" />
@@ -369,7 +327,7 @@ function TaskCard({ task, agentProfile, onClick }: TaskCardProps) {
 
       {/* Stats */}
       <div className="flex items-center gap-4 text-xs text-zinc-500">
-        <span>{task.prediction_count || 0} 预测</span>
+        <span>{task.signal_count || 0} 信号</span>
         {task.target_agent_count && (
           <span>目标: {task.target_agent_count} agents</span>
         )}

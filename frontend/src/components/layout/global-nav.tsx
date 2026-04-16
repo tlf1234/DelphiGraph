@@ -23,9 +23,9 @@ export default function GlobalNav({ user, userProfile }: GlobalNavProps) {
   const pathname = usePathname()
 
   const publicNavItems = [
-    { href: '/market-search', label: '搜索市场', icon: TrendingUp },
+    { href: '/market-search', label: '搜索任务', icon: TrendingUp },
     { href: '/leaderboard', label: '排行榜', icon: Trophy },
-    { href: '/purgatory', label: '炼狱', icon: Flame },
+    { href: '/purgatory', label: '涅槃', icon: Flame },
   ]
 
   return (

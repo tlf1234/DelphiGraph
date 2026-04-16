@@ -17,10 +17,10 @@ supabase/migrations/
 这是一个统一的数据库初始化文件，包含AgentOracle平台的所有数据库对象。
 
 **包含内容**：
-- ✅ 核心表：profiles, markets, predictions, simulations
-- ✅ 炼狱系统：calibration_tasks, redemption_attempts
+- ✅ 核心表：profiles, tasks, predictions, simulations
+- ✅ 涅槃系统：calibration_tasks, redemption_attempts
 - ✅ 信誉系统：reputation_history, reputation_levels
-- ✅ 审计系统：audit_logs, market_status_audit, settlement_audit
+- ✅ 审计系统：audit_logs, task_status_audit, settlement_audit
 - ✅ v5.0功能：nda_agreements, crowdfunding_contributions, niche_tags_reference
 - ✅ 所有索引（基础 + 性能优化 + v5.0）
 - ✅ RLS策略（完整访问控制 + 私密任务支持）
@@ -31,7 +31,7 @@ supabase/migrations/
 
 **功能覆盖**：
 1. 完整的MVP核心功能
-2. 炼狱+救赎机制
+2. 涅槃+救赎机制
 3. 信誉系统和等级体系
 4. v5.0 Search the Future 搜索引擎架构
 5. v5.0 智能分发系统（The Iceberg）
@@ -82,7 +82,7 @@ SELECT * FROM test_search_performance('future AI', 10);
 更新 `supabase/functions/search-predictions/index.ts`，使用数据库函数替代应用层逻辑：
 ```typescript
 // 旧方式：在应用层执行搜索和聚合
-const { data: markets } = await supabase.from('markets').select('*').ilike('title', `%${query}%`);
+const { data: tasks } = await supabase.from('tasks').select('*').ilike('title', `%${query}%`);
 // ... 然后在应用层聚合预测数据
 
 // 新方式：使用优化的数据库函数
@@ -146,7 +146,7 @@ SELECT * FROM slow_queries;
 更新 `supabase/functions/get-tasks/index.ts`，使用数据库函数替代应用层逻辑：
 ```typescript
 // 旧方式：在应用层执行过滤和评分
-const { data: markets } = await supabase.from('markets').select('*').eq('status', 'active');
+const { data: tasks } = await supabase.from('tasks').select('*').eq('status', 'active');
 // ... 然后在应用层过滤访问权限、计算匹配分数
 
 // 新方式：使用优化的数据库函数
@@ -358,10 +358,10 @@ FROM test_smart_distribution_performance('your-agent-uuid', 10);
 NOTICE:  ✅ AgentOracle 完整数据库初始化完成
 NOTICE:  
 NOTICE:  📊 数据库摘要：
-NOTICE:     ✓ 核心表: profiles, markets, predictions, simulations
-NOTICE:     ✓ 炼狱系统: calibration_tasks, redemption_attempts
+NOTICE:     ✓ 核心表: profiles, tasks, predictions, simulations
+NOTICE:     ✓ 涅槃系统: calibration_tasks, redemption_attempts
 NOTICE:     ✓ 信誉系统: reputation_history, reputation_levels
-NOTICE:     ✓ 审计系统: audit_logs, market_status_audit, settlement_audit
+NOTICE:     ✓ 审计系统: audit_logs, task_status_audit, settlement_audit
 NOTICE:     ✓ v5.0功能: nda_agreements, crowdfunding_contributions, niche_tags_reference
 NOTICE:     ✓ 所有索引已创建（包括性能优化索引）
 NOTICE:     ✓ RLS策略已配置（支持私密任务访问控制）
@@ -385,8 +385,8 @@ ORDER BY table_name;
 - audit_logs
 - calibration_tasks
 - crowdfunding_contributions
-- market_status_audit
-- markets
+- task_status_audit
+- tasks
 - nda_agreements
 - niche_tags_reference
 - predictions
@@ -407,14 +407,14 @@ ORDER BY routine_name;
 ```
 
 **预期结果**：应该包含以下关键函数：
-- auto_close_expired_markets
+- auto_close_expired_tasks
 - calculate_brier_score
 - can_access_private_task
 - delete_user_account
 - get_top_10_percent_threshold
 - is_admin
 - log_audit
-- resolve_market_transaction
+- resolve_task_transaction
 - update_user_reputation_and_earnings
 
 ##### 验证3：检查RLS策略
@@ -457,7 +457,7 @@ ORDER BY tag_key;
 ```sql
 SELECT jobname, schedule, command
 FROM cron.job
-WHERE jobname = 'auto-close-markets';
+WHERE jobname = 'auto-close-tasks';
 ```
 
 **预期结果**：应该看到市场自动关闭的定时任务
@@ -529,7 +529,7 @@ WHERE table_schema = 'public';
 
 **必须包含的表**：
 - ✅ profiles（用户档案）
-- ✅ markets（预测市场）
+- ✅ tasks（预测市场）
 - ✅ predictions（预测提交）
 - ✅ simulations（未来模拟器）
 - ✅ calibration_tasks（校准任务）
@@ -537,7 +537,7 @@ WHERE table_schema = 'public';
 - ✅ reputation_history（信誉历史）
 - ✅ reputation_levels（信誉等级配置）
 - ✅ audit_logs（审计日志）
-- ✅ market_status_audit（市场状态审计）
+- ✅ task_status_audit（市场状态审计）
 - ✅ settlement_audit（结算审计）
 - ✅ nda_agreements（NDA签署记录）
 - ✅ crowdfunding_contributions（众筹贡献）
@@ -551,28 +551,28 @@ SELECT routine_name
 FROM information_schema.routines
 WHERE routine_schema = 'public'
   AND routine_name IN (
-    'auto_close_expired_markets',
+    'auto_close_expired_tasks',
     'calculate_brier_score',
     'can_access_private_task',
     'delete_user_account',
     'get_top_10_percent_threshold',
     'is_admin',
     'log_audit',
-    'resolve_market_transaction',
+    'resolve_task_transaction',
     'update_user_reputation_and_earnings'
   )
 ORDER BY routine_name;
 ```
 
 **必须包含的函数**：
-- ✅ auto_close_expired_markets（市场自动关闭）
+- ✅ auto_close_expired_tasks（市场自动关闭）
 - ✅ calculate_brier_score（Brier Score计算）
 - ✅ can_access_private_task（私密任务访问检查）
 - ✅ delete_user_account（账号删除）
 - ✅ get_top_10_percent_threshold（Top 10%阈值计算）
 - ✅ is_admin（管理员检查）
 - ✅ log_audit（审计日志记录）
-- ✅ resolve_market_transaction（市场结算）
+- ✅ resolve_task_transaction（市场结算）
 - ✅ update_user_reputation_and_earnings（信誉和收益更新）
 
 ### 触发器检查
@@ -587,13 +587,13 @@ ORDER BY event_object_table, trigger_name;
 
 **必须包含的触发器**：
 - ✅ update_profiles_updated_at（profiles表自动更新时间戳）
-- ✅ update_markets_updated_at（markets表自动更新时间戳）
+- ✅ update_tasks_updated_at（tasks表自动更新时间戳）
 - ✅ update_user_prediction_count（预测计数自动更新）
 - ✅ trigger_update_funding_progress（众筹进度自动计算）
-- ✅ trigger_auto_activate_crowdfunded_market（众筹达标自动激活）
-- ✅ market_status_change_trigger（市场状态变更审计）
+- ✅ trigger_auto_activate_crowdfunded_task（众筹达标自动激活）
+- ✅ task_status_change_trigger（市场状态变更审计）
 - ✅ audit_profiles_trigger（profiles审计）
-- ✅ audit_markets_trigger（markets审计）
+- ✅ audit_tasks_trigger（tasks审计）
 - ✅ audit_predictions_trigger（predictions审计）
 
 ### RLS策略检查
@@ -609,7 +609,7 @@ ORDER BY tablename;
 
 **必须包含的RLS策略**：
 - ✅ profiles表：5个策略（查看、更新、插入、删除、服务角色）
-- ✅ markets表：5个策略（v5.0私密任务访问控制）
+- ✅ tasks表：5个策略（v5.0私密任务访问控制）
 - ✅ predictions表：4个策略（v5.0 NDA验证）
 - ✅ simulations表：2个策略
 - ✅ audit_logs表：2个策略
@@ -662,7 +662,7 @@ ORDER BY table_name;
 ```
 
 **必须包含的视图**：
-- ✅ public_market_stats（市场统计）
+- ✅ public_task_stats（市场统计）
 - ✅ index_usage（索引使用情况）
 - ✅ table_bloat（表膨胀监控）
 
@@ -672,7 +672,7 @@ ORDER BY table_name;
 -- 检查定时任务（需要先启用pg_cron扩展）
 SELECT jobname, schedule, command
 FROM cron.job
-WHERE jobname = 'auto-close-markets';
+WHERE jobname = 'auto-close-tasks';
 ```
 
 **预期结果**：应该看到市场自动关闭的定时任务（每分钟执行一次）
@@ -697,7 +697,7 @@ WHERE jobname = 'auto-close-markets';
 
 **14个表**：
 1. profiles（用户档案）- 含v5.0 niche_tags字段
-2. markets（预测市场）- 含v5.0私密任务和众筹字段
+2. tasks（预测市场）- 含v5.0私密任务和众筹字段
 3. predictions（预测提交）
 4. simulations（未来模拟器）
 5. calibration_tasks（校准任务）
@@ -705,7 +705,7 @@ WHERE jobname = 'auto-close-markets';
 7. reputation_history（信誉历史）
 8. reputation_levels（信誉等级配置）- 预置8个等级
 9. audit_logs（审计日志）
-10. market_status_audit（市场状态审计）
+10. task_status_audit（市场状态审计）
 11. settlement_audit（结算审计）
 12. nda_agreements（NDA签署记录）- v5.0
 13. crowdfunding_contributions（众筹贡献）- v5.0
@@ -715,15 +715,15 @@ WHERE jobname = 'auto-close-markets';
 1. update_updated_at_column（自动更新时间戳）
 2. update_prediction_count（预测计数更新）
 3. update_funding_progress（众筹进度计算）- v5.0
-4. auto_activate_crowdfunded_market（众筹达标激活）- v5.0
-5. auto_close_expired_markets（市场自动关闭）
-6. trigger_market_auto_close（手动触发关闭）
-7. log_market_status_change（状态变更审计）
+4. auto_activate_crowdfunded_task（众筹达标激活）- v5.0
+5. auto_close_expired_tasks（市场自动关闭）
+6. trigger_task_auto_close（手动触发关闭）
+7. log_task_status_change（状态变更审计）
 8. update_user_reputation_and_earnings（信誉和收益更新）
-9. resolve_market_transaction（市场结算）
+9. resolve_task_transaction（市场结算）
 10. log_audit（审计日志记录）
 11. audit_profiles_changes（profiles审计）
-12. audit_markets_changes（markets审计）
+12. audit_tasks_changes（tasks审计）
 13. audit_predictions_changes（predictions审计）
 14. delete_user_account（账号删除）
 15. calculate_brier_score（Brier Score计算）
@@ -733,18 +733,18 @@ WHERE jobname = 'auto-close-markets';
 
 **9个触发器**：
 1. update_profiles_updated_at
-2. update_markets_updated_at
+2. update_tasks_updated_at
 3. update_user_prediction_count
 4. trigger_update_funding_progress - v5.0
-5. trigger_auto_activate_crowdfunded_market - v5.0
-6. market_status_change_trigger
+5. trigger_auto_activate_crowdfunded_task - v5.0
+6. task_status_change_trigger
 7. audit_profiles_trigger
-8. audit_markets_trigger
+8. audit_tasks_trigger
 9. audit_predictions_trigger
 
 **22个RLS策略**：
 - profiles表：5个策略
-- markets表：5个策略（含v5.0私密任务访问控制）
+- tasks表：5个策略（含v5.0私密任务访问控制）
 - predictions表：4个策略（含v5.0 NDA验证）
 - simulations表：2个策略
 - audit_logs表：2个策略
@@ -757,12 +757,12 @@ WHERE jobname = 'auto-close-markets';
 - v5.0新增索引（niche_tags GIN索引、funding_progress等）
 
 **3个监控视图**：
-1. public_market_stats（市场统计）
+1. public_task_stats（市场统计）
 2. index_usage（索引使用情况）
 3. table_bloat（表膨胀监控）
 
 **1个定时任务**：
-- auto-close-markets（每分钟检查并关闭过期市场）
+- auto-close-tasks（每分钟检查并关闭过期市场）
 
 ### 数据备份
 
@@ -964,10 +964,10 @@ ORDER BY 检查项;
 ```sql
 WITH expected_tables AS (
   SELECT unnest(ARRAY[
-    'profiles', 'markets', 'predictions', 'simulations',
+    'profiles', 'tasks', 'predictions', 'simulations',
     'calibration_tasks', 'redemption_attempts',
     'reputation_history', 'reputation_levels',
-    'audit_logs', 'market_status_audit', 'settlement_audit',
+    'audit_logs', 'task_status_audit', 'settlement_audit',
     'nda_agreements', 'crowdfunding_contributions', 'niche_tags_reference'
   ]) AS table_name
 )
@@ -982,14 +982,14 @@ WHERE t.table_name IS NULL;
 ```sql
 WITH expected_functions AS (
   SELECT unnest(ARRAY[
-    'auto_close_expired_markets',
+    'auto_close_expired_tasks',
     'calculate_brier_score',
     'can_access_private_task',
     'delete_user_account',
     'get_top_10_percent_threshold',
     'is_admin',
     'log_audit',
-    'resolve_market_transaction',
+    'resolve_task_transaction',
     'update_user_reputation_and_earnings'
   ]) AS function_name
 )
@@ -1005,13 +1005,13 @@ WHERE r.routine_name IS NULL;
 WITH expected_triggers AS (
   SELECT unnest(ARRAY[
     'update_profiles_updated_at',
-    'update_markets_updated_at',
+    'update_tasks_updated_at',
     'update_user_prediction_count',
     'trigger_update_funding_progress',
-    'trigger_auto_activate_crowdfunded_market',
-    'market_status_change_trigger',
+    'trigger_auto_activate_crowdfunded_task',
+    'task_status_change_trigger',
     'audit_profiles_trigger',
-    'audit_markets_trigger',
+    'audit_tasks_trigger',
     'audit_predictions_trigger'
   ]) AS trigger_name
 )
@@ -1041,10 +1041,10 @@ SELECT column_name, data_type
 FROM information_schema.columns
 WHERE table_name = 'profiles' AND column_name = 'niche_tags';
 
--- 检查markets表的v5.0字段
+-- 检查tasks表的v5.0字段
 SELECT column_name, data_type
 FROM information_schema.columns
-WHERE table_name = 'markets' 
+WHERE table_name = 'tasks' 
   AND column_name IN ('visibility', 'funding_type', 'requires_nda', 'required_niche_tags');
 ```
 

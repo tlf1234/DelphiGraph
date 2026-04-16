@@ -1,50 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { signNda } from '@/services/nda'
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    
-    // 验证用户认证
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
-      return NextResponse.json(
-        { error: '请先登录' },
-        { status: 401 }
-      )
-    }
+    const { task_id, ip_address, user_agent } = await request.json()
+    if (!task_id) return NextResponse.json({ error: '缺少 task_id 参数' }, { status: 400 })
 
-    // 获取请求体
-    const body = await request.json()
+    const ip = ip_address ?? request.headers.get('x-forwarded-for') ?? undefined
+    const ua = user_agent ?? request.headers.get('user-agent') ?? undefined
 
-    // 调用 Supabase Edge Function
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/sign-nda`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify(body),
-      }
-    )
-
-    const result = await response.json()
-
-    if (!response.ok) {
-      return NextResponse.json(
-        { error: result.error || '签署NDA失败' },
-        { status: response.status }
-      )
+    const result = await signNda(task_id, ip, ua)
+    if (!result.success) {
+      return NextResponse.json({ error: result.error }, { status: result.error === '请先登录' ? 401 : 500 })
     }
 
     return NextResponse.json(result)
   } catch (error) {
     console.error('Sign NDA error:', error)
-    return NextResponse.json(
-      { error: '服务器错误' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: '服务器错误' }, { status: 500 })
   }
 }

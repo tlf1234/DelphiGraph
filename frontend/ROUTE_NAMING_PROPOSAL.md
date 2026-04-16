@@ -2,9 +2,9 @@
 
 ## 🎯 问题分析
 
-当前 `markets` 这个词在不同地方有不同含义：
-- `(dashboard)/markets/create` - 创建任务
-- `(public)/markets/[id]` - 查看任务详情
+当前 `tasks` 这个词在不同地方有不同含义：
+- `(dashboard)/tasks/create` - 创建任务
+- `(public)/tasks/[id]` - 查看任务详情
 - 但实际上我们的产品叫"搜索未来任务"或"预言任务"
 
 ## ✅ 推荐方案：统一使用 "tasks" 命名
@@ -14,25 +14,25 @@
 ```
 frontend/src/app/
 ├── (dashboard)/
-│   └── tasks/              # 重命名：markets → tasks
+│   └── tasks/              # 重命名：tasks → tasks
 │       └── create/         # 创建任务
 ├── (public)/
-│   └── tasks/              # 重命名：markets → tasks
+│   └── tasks/              # 重命名：tasks → tasks
 │       └── [id]/           # 任务详情
-└── market-search/          # 保持：搜索任务列表
+└── task-search/          # 保持：搜索任务列表
 ```
 
 ### URL 变化
 
 **之前：**
-- 创建任务：`/markets/create`
-- 任务详情：`/markets/123`
-- 搜索任务：`/market-search`
+- 创建任务：`/tasks/create`
+- 任务详情：`/tasks/123`
+- 搜索任务：`/task-search`
 
 **之后：**
 - 创建任务：`/tasks/create`
 - 任务详情：`/tasks/123`
-- 搜索任务：`/market-search` 或 `/tasks/search`
+- 搜索任务：`/task-search` 或 `/tasks/search`
 
 ## 🤔 另一个方案：使用更具体的命名
 
@@ -48,7 +48,7 @@ frontend/src/app/
 ├── (public)/
 │   └── quest/              # 任务详情
 │       └── [id]/
-└── search/                 # 重命名：market-search → search
+└── search/                 # 重命名：task-search → search
 ```
 
 **URL：**
@@ -73,9 +73,9 @@ frontend/src/app/
 
 **推荐方案 A（quest）**，理由：
 1. **语义清晰**：quest 表示"探索任务"，符合产品定位
-2. **简洁易记**：比 market 更贴切，比 task 更有特色
+2. **简洁易记**：比 task 更贴切，比 task 更有特色
 3. **统一命名**：
-   - 数据库表：`markets` → 保持不变（避免大规模迁移）
+   - 数据库表：`tasks` → 保持不变（避免大规模迁移）
    - 前端路由：`/quest/` → 用户友好
    - 组件目录：`components/quest/` → 代码清晰
 
@@ -83,7 +83,7 @@ frontend/src/app/
 
 | 方案 | URL示例 | 优点 | 缺点 |
 |------|---------|------|------|
-| 保持 markets | `/markets/123` | 无需改动 | 命名不够准确 |
+| 保持 tasks | `/tasks/123` | 无需改动 | 命名不够准确 |
 | 改为 tasks | `/tasks/123` | 通用、清晰 | 略显平淡 |
 | 改为 quest | `/quest/123` | 有特色、语义好 | 需要适应 |
 | 改为 search-detail | `/search-detail/123` | 描述准确 | 太长、不优雅 |

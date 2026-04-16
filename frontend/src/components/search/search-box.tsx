@@ -56,7 +56,7 @@ export function SearchBox({ onSearch, isLoading = false }: SearchBoxProps) {
   // 模拟搜索建议（实际应该从API获取）
   const mockSuggestions: SearchSuggestion[] = [
     { text: 'AI breakthrough 2024', type: 'trending' },
-    { text: 'Bitcoin price prediction', type: 'trending' },
+    { text: 'Bitcoin price analysis', type: 'trending' },
     { text: 'Climate change impact', type: 'recent' },
     { text: 'Tech IPO success', type: 'recent' },
     { text: 'Election outcome', type: 'trending' },

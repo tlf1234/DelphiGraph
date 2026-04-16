@@ -26,7 +26,7 @@ export async function GET(
     const surveyId = params.id
 
     const [surveyRes, questionsRes, analysesRes, responsesRes] = await Promise.all([
-      supa.from('surveys').select('*').eq('id', surveyId).maybeSingle(),
+      supa.from('survey_tasks').select('*').eq('id', surveyId).maybeSingle(),
       supa.from('survey_questions').select('*').eq('survey_id', surveyId).order('question_order'),
       supa.from('survey_analyses').select('*').eq('survey_id', surveyId),
       supa.from('survey_responses')
@@ -63,7 +63,7 @@ export async function PATCH(
     const supa = serviceSupa()
     const surveyId = params.id
 
-    const existing = await supa.from('surveys').select('creator_id, status').eq('id', surveyId).maybeSingle()
+    const existing = await supa.from('survey_tasks').select('creator_id, status').eq('id', surveyId).maybeSingle()
     if (!existing.data) return NextResponse.json({ error: '调查不存在' }, { status: 404 })
     if (existing.data.creator_id !== user.id) return NextResponse.json({ error: '无权限' }, { status: 403 })
     if (existing.data.status !== 'draft') return NextResponse.json({ error: '只有草稿状态可修改' }, { status: 400 })
@@ -75,7 +75,7 @@ export async function PATCH(
       if (key in body) updates[key] = body[key]
     }
 
-    const { data, error } = await supa.from('surveys').update(updates).eq('id', surveyId).select().single()
+    const { data, error } = await supa.from('survey_tasks').update(updates).eq('id', surveyId).select().single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     return NextResponse.json({ survey: data })
@@ -96,11 +96,11 @@ export async function DELETE(
     const supa = serviceSupa()
     const surveyId = params.id
 
-    const existing = await supa.from('surveys').select('creator_id').eq('id', surveyId).maybeSingle()
+    const existing = await supa.from('survey_tasks').select('creator_id').eq('id', surveyId).maybeSingle()
     if (!existing.data) return NextResponse.json({ error: '调查不存在' }, { status: 404 })
     if (existing.data.creator_id !== user.id) return NextResponse.json({ error: '无权限' }, { status: 403 })
 
-    await supa.from('surveys').delete().eq('id', surveyId)
+    await supa.from('survey_tasks').delete().eq('id', surveyId)
     return NextResponse.json({ success: true })
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })

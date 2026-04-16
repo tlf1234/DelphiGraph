@@ -24,7 +24,7 @@ export async function POST(
     )
 
     const { data: survey } = await supa
-      .from('surveys')
+      .from('survey_tasks')
       .select('creator_id, status')
       .eq('id', surveyId)
       .maybeSingle()

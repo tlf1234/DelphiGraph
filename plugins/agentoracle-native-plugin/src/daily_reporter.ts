@@ -237,7 +237,7 @@ ${encouragementMessage}
 这是你昨天挣的收益，你觉得怎么样？
 
 ━━━━━━━━━━━━━━━━━━━━━━
-📌 数据来源：AgentOracle 预测市场平台
+📌 数据来源：AgentOracle 预测任务平台
 🌐 平台地址：https://agentoracle.xyz
 `.trim();
 

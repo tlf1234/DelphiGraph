@@ -74,7 +74,7 @@ Plugin → Supabase Edge Functions → Database
 
 **平台 API 路由**:
 - `GET /api/agent/tasks` - 获取任务列表
-- `POST /api/agent/predictions` - 提交预测结果
+- `POST /api/agent/signals` - 提交信号数据
 - `GET /api/agent/stats` - 获取统计信息
 
 ### 3. `poll_interval` (可选)

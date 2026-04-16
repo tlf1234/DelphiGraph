@@ -10,7 +10,7 @@ interface SearchResult {
   question: string
   summary: string
   consensusProbability: number
-  predictionCount: number
+  signalCount: number
   status: string
   closesAt?: string
   relevanceScore?: number
@@ -19,7 +19,7 @@ interface SearchResult {
 interface SearchResultsProps {
   results: SearchResult[]
   isLoading: boolean
-  sortBy?: 'relevance' | 'consensus' | 'predictions'
+  sortBy?: 'relevance' | 'consensus' | 'signals'
 }
 
 export function SearchResults({ results, isLoading, sortBy = 'relevance' }: SearchResultsProps) {
@@ -30,8 +30,8 @@ export function SearchResults({ results, isLoading, sortBy = 'relevance' }: Sear
         return (b.relevanceScore || 0) - (a.relevanceScore || 0)
       case 'consensus':
         return Math.abs(b.consensusProbability - 0.5) - Math.abs(a.consensusProbability - 0.5)
-      case 'predictions':
-        return b.predictionCount - a.predictionCount
+      case 'signals':
+        return b.signalCount - a.signalCount
       default:
         return 0
     }
@@ -73,7 +73,7 @@ export function SearchResults({ results, isLoading, sortBy = 'relevance' }: Sear
 
   // Calculate aggregate insights
   const aggregateInsights = {
-    totalPredictions: results.reduce((sum, r) => sum + r.predictionCount, 0),
+    totalSignals: results.reduce((sum, r) => sum + r.signalCount, 0),
     avgConsensus: results.length > 0 
       ? results.reduce((sum, r) => sum + r.consensusProbability, 0) / results.length 
       : 0,
@@ -133,8 +133,8 @@ export function SearchResults({ results, isLoading, sortBy = 'relevance' }: Sear
             <div className="text-2xl font-bold text-blue-400">{results.length}</div>
           </div>
           <div className="text-center">
-            <div className="text-xs text-zinc-500 font-mono mb-1">智能体预测</div>
-            <div className="text-2xl font-bold text-purple-400">{aggregateInsights.totalPredictions}</div>
+            <div className="text-xs text-zinc-500 font-mono mb-1">智能体信号</div>
+            <div className="text-2xl font-bold text-purple-400">{aggregateInsights.totalSignals}</div>
           </div>
           <div className="text-center">
             <div className="text-xs text-zinc-500 font-mono mb-1">平均共识</div>
@@ -162,16 +162,16 @@ export function SearchResults({ results, isLoading, sortBy = 'relevance' }: Sear
               {consensusLevel}
             </span>
             <span className="text-xs text-zinc-500 font-mono">
-              基于 {aggregateInsights.totalPredictions} 个智能体的分析
+              基于 {aggregateInsights.totalSignals} 个智能体的分析
             </span>
           </div>
 
           <div className="prose prose-invert prose-lg max-w-none">
             <p className="text-zinc-200 leading-relaxed font-serif">
-              根据 {results.length} 个相关预测市场的集体智慧分析，智能体们对搜索主题展现出{consensusLevel}的态度。
-              其中 {aggregateInsights.strongConsensusCount} 个市场达成强共识，
-              {aggregateInsights.dividedCount} 个市场存在明显分歧。
-              这些预测汇聚了 {aggregateInsights.totalPredictions} 个AI智能体的独立判断，
+              根据 {results.length} 个相关预测任务的集体智慧分析，智能体们对搜索主题展现出{consensusLevel}的态度。
+              其中 {aggregateInsights.strongConsensusCount} 个任务达成强共识，
+              {aggregateInsights.dividedCount} 个任务存在明显分歧。
+              这些信号汇聚了 {aggregateInsights.totalSignals} 个AI智能体的独立判断，
               为理解未来趋势提供了多维度的视角。
             </p>
           </div>
@@ -190,7 +190,7 @@ export function SearchResults({ results, isLoading, sortBy = 'relevance' }: Sear
               <div className="text-xs text-emerald-400 font-mono mb-2">共识点</div>
               <div className="text-sm text-zinc-300">
                 {aggregateInsights.strongConsensusCount > 0
-                  ? `${aggregateInsights.strongConsensusCount} 个市场显示智能体们对结果有高度一致的预期`
+                  ? `${aggregateInsights.strongConsensusCount} 个任务显示智能体们对结果有高度一致的预期`
                   : '智能体们的观点存在一定分散'}
               </div>
             </div>
@@ -198,7 +198,7 @@ export function SearchResults({ results, isLoading, sortBy = 'relevance' }: Sear
               <div className="text-xs text-purple-400 font-mono mb-2">分歧点</div>
               <div className="text-sm text-zinc-300">
                 {aggregateInsights.dividedCount > 0
-                  ? `${aggregateInsights.dividedCount} 个市场存在显著观点差异，需要关注不同视角`
+                  ? `${aggregateInsights.dividedCount} 个任务存在显著观点差异，需要关注不同视角`
                   : '智能体们的预测高度集中'}
               </div>
             </div>
@@ -206,10 +206,10 @@ export function SearchResults({ results, isLoading, sortBy = 'relevance' }: Sear
         </motion.div>
       </motion.div>
 
-      {/* Detailed Predictions - Newspaper Article Style */}
+      {/* Detailed Signals - Newspaper Article Style */}
       <div className="space-y-6">
         <h2 className="text-2xl font-bold text-white mb-6 font-serif border-b-2 border-zinc-700 pb-3">
-          详细预测报道
+          详细分析报道
         </h2>
 
         {sortedResults.map((result, index) => {
@@ -312,7 +312,7 @@ export function SearchResults({ results, isLoading, sortBy = 'relevance' }: Sear
                   <div className="flex items-center gap-2">
                     <Users className="w-4 h-4" />
                     <span>
-                      <span className="text-white font-semibold">{result.predictionCount}</span> 个智能体
+                      <span className="text-white font-semibold">{result.signalCount}</span> 个智能体
                     </span>
                   </div>
 

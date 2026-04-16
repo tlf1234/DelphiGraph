@@ -1,23 +1,22 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import {
   Task,
-  PredictionSubmission,
+  SignalSubmission,
   Stats,
   NetworkError,
   AuthenticationError,
-  RateLimitError
+  RateLimitError,
+  PluginLogger
 } from './types';
-
 /**
  * APIClient 类
  * 封装所有与 AgentOracle API 的 HTTP 通信
  */
 export class APIClient {
   private axiosInstance: AxiosInstance;
-
-  constructor(private apiKey: string) {
+  constructor(private apiKey: string, private baseUrl: string, private logger: PluginLogger) {
     this.axiosInstance = axios.create({
-      baseURL: 'https://your-platform-domain.com',
+      baseURL: baseUrl,
       timeout: 30000,
       headers: {
         'x-api-key': apiKey,
@@ -25,8 +24,9 @@ export class APIClient {
         'User-Agent': 'agentoracle-native-plugin/1.0.0'
       }
     });
+    this.logger.info(`[agentoracle-native-plugin] APIClient initialized: baseURL=${baseUrl}`);
+    this.logger.info(`[agentoracle-native-plugin] APIClient apiKey=${apiKey.substring(0, 8)}...`);
   }
-
   /**
    * 获取待处理任务
    * @returns 任务对象，如果无可用任务则返回 null
@@ -35,35 +35,55 @@ export class APIClient {
    * @throws RateLimitError 请求频率超限
    */
   async fetchTask(): Promise<Task | null> {
+    const url = `${this.baseUrl}/api/agent/tasks`;
+    this.logger.info(`[agentoracle-native-plugin] Fetching task: GET ${url}`);
     try {
       const response = await this.axiosInstance.get('/api/agent/tasks');
-      
-      // 平台路由返回 { tasks: [...] }
+      this.logger.info(`[agentoracle-native-plugin] fetchTask response: status=${response.status}`);
+      this.logger.info(`[agentoracle-native-plugin] fetchTask response body: ${JSON.stringify(response.data)}`);
+      // 204 = 无可用任务
+      if (response.status === 204) {
+        return null;
+      }
+      // 返回 { tasks: [...], agent_reputation: ... }
       if (response.data && response.data.tasks && response.data.tasks.length > 0) {
         return response.data.tasks[0] as Task;
       }
-      
       return null;
     } catch (error) {
       return this.handleError(error);
     }
   }
-
   /**
-   * 提交预测结果
-   * @param submission 预测提交数据
+   * 提交数据因子信号 (v3.0)
+   * @param submission 信号提交数据
    * @throws NetworkError 网络连接失败
    * @throws AuthenticationError API Key 无效
    * @throws RateLimitError 请求频率超限
    */
-  async submitResult(submission: PredictionSubmission): Promise<void> {
+  async submitSignals(submission: SignalSubmission): Promise<void> {
     try {
-      await this.axiosInstance.post('/api/agent/predictions', submission);
+      // 【UAP v3.0 调试】打印即将发送的完整 POST body
+      try {
+        const bodyPreview = JSON.stringify(submission, null, 2);
+        this.logger.info(
+          `[agentoracle-native-plugin] 📤 POST /api/agent/signals ` +
+          `- body 长度=${bodyPreview.length} chars, 信号数=${submission.signals?.length ?? 0}`
+        );
+        this.logger.info('[agentoracle-native-plugin] ---- POST body BEGIN ----');
+        for (const line of bodyPreview.split('\n')) {
+          this.logger.info(`[agentoracle-native-plugin] > ${line}`);
+        }
+        this.logger.info('[agentoracle-native-plugin] ---- POST body END ----');
+      } catch (dbgErr) {
+        this.logger.warn(`[agentoracle-native-plugin] 打印 POST body 失败: ${dbgErr}`);
+      }
+      
+      await this.axiosInstance.post('/api/agent/signals', submission);
     } catch (error) {
       this.handleError(error);
     }
   }
-
   /**
    * 查询统计数据
    * @returns 统计数据对象，如果无法获取则返回默认值对象
@@ -78,11 +98,8 @@ export class APIClient {
       reputation_score: 0,
       rank: undefined
     };
-
     try {
-      // 通过平台统一路由获取统计数据
       const response = await this.axiosInstance.get('/api/agent/stats');
-
       if (response.data) {
         return {
           total_earnings: 0,
@@ -91,7 +108,6 @@ export class APIClient {
           rank: undefined
         };
       }
-
       return defaultStats;
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 404) {
@@ -100,7 +116,6 @@ export class APIClient {
       return this.handleError(error);
     }
   }
-
   /**
    * 统一错误处理
    * @param error Axios 错误对象
@@ -110,27 +125,25 @@ export class APIClient {
     // 处理 Axios 错误
     if (axios.isAxiosError(error)) {
       const axiosError = error as AxiosError;
-
       // 网络错误
       if (!axiosError.response) {
+        this.logger.error(`[agentoracle-native-plugin] API network error: code=${axiosError.code} message=${axiosError.message}`);
         if (axiosError.code === 'ECONNREFUSED' || axiosError.code === 'ETIMEDOUT') {
           throw new NetworkError('无法连接到 AgentOracle API');
         }
         throw new NetworkError(`网络错误: ${axiosError.message}`);
       }
-
       // HTTP 错误
       const status = axiosError.response.status;
-
+      const responseBody = JSON.stringify(axiosError.response.data);
+      this.logger.error(`[agentoracle-native-plugin] API HTTP error: status=${status} body=${responseBody}`);
       if (status === 404) {
         // 404 表示无可用任务，返回 null
         return null as never;
       }
-
       if (status === 401) {
         throw new AuthenticationError('API Key 无效或已过期');
       }
-
       if (status === 429) {
         const retryAfter = parseInt(
           axiosError.response.headers['retry-after'] || '60',
@@ -141,13 +154,12 @@ export class APIClient {
           retryAfter
         );
       }
-
       throw new NetworkError(
         `HTTP 错误 ${status}: ${axiosError.response.statusText}`
       );
     }
-
     // 其他未知错误
+    this.logger.error(`[agentoracle-native-plugin] API unknown error: ${error.message || error}`);
     throw new NetworkError(`未知错误: ${error.message || error}`);
   }
 }

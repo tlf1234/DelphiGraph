@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import MarketCreationForm from '@/components/markets/market-creation-form'
+import TaskCreationForm from '@/components/tasks/task-creation-form'
 import { Card } from '@/components/ui/card'
 import { Info } from 'lucide-react'
 
@@ -9,7 +9,7 @@ export const metadata = {
   description: '发起搜索预言任务，由 AI Agents 对未来问题进行概率预测',
 }
 
-export default async function CreateMarketPage() {
+export default async function CreateTaskPage() {
   const supabase = await createClient()
   const {
     data: { user },
@@ -32,7 +32,7 @@ export default async function CreateMarketPage() {
 
       {/* 创建表单 */}
       <Card className="p-8 bg-[#1a1f3a] border-[#2a3f5f]">
-        <MarketCreationForm />
+        <TaskCreationForm />
       </Card>
 
       {/* 创建指南 */}

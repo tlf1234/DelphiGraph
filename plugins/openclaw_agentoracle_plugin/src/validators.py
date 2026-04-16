@@ -18,10 +18,9 @@ except ImportError:
 MAX_LENGTHS = {
     "question": 5000,
     "keyword": 100,
-    "prediction": 10000,  # Increased to accommodate full analysis reports
     "reasoning": 10000,   # Increased to accommodate detailed reasoning
-    "rationale": 10000,   # New structured field for prediction rationale
-    "evidence_text": 5000, # New structured field for evidence text
+    "rationale": 10000,   # Structured field for submission rationale
+    "evidence_text": 5000, # Structured field for evidence text
     "api_key": 128,
     "task_id": 100,
     "id": 100,            # Task ID (UUID format from get-tasks)
@@ -38,7 +37,6 @@ class StringLengthValidator:
     Maximum length limits:
         - question: 5000 characters
         - keyword: 100 characters
-        - prediction: 10000 characters
         - reasoning: 10000 characters
         - rationale: 10000 characters
         - evidence_text: 5000 characters
@@ -78,9 +76,8 @@ class StringLengthValidator:
         
         Checks the string length against the maximum limit defined for the field
         type. Different fields have different limits based on their expected use:
-        - question: 5000 chars (long-form questions)
+        - question: Max 5000 characters
         - keyword: 100 chars (short keywords)
-        - prediction: 2000 chars (prediction answers)
         - reasoning: 5000 chars (detailed explanations)
         - api_key: 128 chars (authentication tokens)
         - task_id: 100 chars (identifiers)
@@ -197,22 +194,21 @@ class StringLengthValidator:
             )
             return False
     
-    def validate_prediction_strings(self, prediction_data: Dict[str, Any]) -> bool:
-        """Validate all string fields in a prediction data object.
+    def validate_submission_strings(self, submission_data: Dict[str, Any]) -> bool:
+        """Validate all string fields in a submission data object.
         
-        Checks the length of prediction/rationale/reasoning/evidence_text fields.
+        Checks the length of rationale/reasoning/evidence_text fields.
         All must be within their respective length limits.
         
         Validated fields:
-        - prediction: Max 10000 characters (backward compat)
-        - reasoning: Max 10000 characters (backward compat)
-        - rationale: Max 10000 characters (new structured field)
-        - evidence_text: Max 5000 characters (new structured field)
+        - reasoning: Max 10000 characters
+        - rationale: Max 10000 characters
+        - evidence_text: Max 5000 characters
         
-        Numeric fields (probability, confidence, relevance_score) are not validated.
+        Numeric fields (relevance_score) are not validated.
         
         Args:
-            prediction_data: Prediction dictionary containing text fields.
+            submission_data: Submission dictionary containing text fields.
             
         Returns:
             True if all string fields pass validation.
@@ -220,27 +216,26 @@ class StringLengthValidator:
             
         Example:
             >>> validator = StringLengthValidator()
-            >>> prediction = {
-            ...     "probability": 0.75,
+            >>> submission = {
             ...     "rationale": "Based on weather patterns...",
             ...     "evidence_type": "hard_fact"
             ... }
-            >>> validator.validate_prediction_strings(prediction)
+            >>> validator.validate_submission_strings(submission)
             True
         """
         try:
             # Validate all text fields that have length limits
-            text_fields = ["prediction", "reasoning", "rationale", "evidence_text"]
+            text_fields = ["reasoning", "rationale", "evidence_text"]
             for field in text_fields:
-                if field in prediction_data and isinstance(prediction_data[field], str):
-                    if not self.validate_string_length(prediction_data[field], field):
+                if field in submission_data and isinstance(submission_data[field], str):
+                    if not self.validate_string_length(submission_data[field], field):
                         return False
             
             return True
             
         except Exception as e:
             self.logger.error(
-                f"[AgentOracle] Error validating prediction strings: {e}",
+                f"[AgentOracle] Error validating submission strings: {e}",
                 exc_info=True
             )
             return False

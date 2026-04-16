@@ -11,7 +11,7 @@
 //   - 需要展示完整图谱时
 // 核心逻辑：
 //   1. 检测图谱是否已包含 Agent 节点（已增强）
-//   2. 如果未增强，从 predictions 数据生成 Agent 和 Signal 节点
+//   2. 如果未增强，从 signal_submissions 数据生成 Agent 和 Signal 节点
 //   3. 保留后端返回的 Cluster 节点（不覆盖）
 //   4. 使用关键词匹配将 Signal 连接到合适的 Factor
 //   5. 返回增强后的图谱数据
@@ -21,18 +21,28 @@
 // 类型定义
 // ══════════════════════════════════════════════════════════════
 
-// 原始预测数据结构（来自 Supabase predictions 表）
-export interface RawPrediction {
+// v3.0 信号提交中的单条信号
+export interface RawSignal {
+  signal_id: string
+  evidence_type: 'hard_fact' | 'persona_inference'
+  source_type?: string
+  data_exclusivity?: 'private' | 'semi_private' | 'public'
+  evidence_text: string
+  relevance_reasoning?: string
+  relevance_score?: number
+  source_urls?: string[]
+  entity_tags?: Array<{ text: string; type: string; role?: string }>
+}
+
+// 原始信号提交数据结构（来自 Supabase signal_submissions 表，v3.0）
+export interface RawSignalSubmission {
   id: string
   user_id: string
-  probability: number           // 预测概率（0-1）
-  rationale: string             // 预测理由
-  evidence_type?: string        // 证据类型：'hard_fact' | 'persona_inference'
-  relevance_score?: number      // 相关性分数（0-1）
-  entity_tags?: Array<{ text: string; type: string; role?: string }>  // 实体标签
-  source_url?: string           // 数据来源 URL
-  submitted_at?: string         // 提交时间
-  profiles?: {                  // 用户信息（JOIN profiles 表）
+  status: 'submitted' | 'abstained'
+  signals: RawSignal[]
+  user_persona?: Record<string, unknown> | null
+  submitted_at?: string
+  profiles?: {
     id: string
     username: string
     avatar_url?: string | null
@@ -44,6 +54,7 @@ export interface RawPrediction {
     persona_interests?: string[] | null
   } | null
 }
+
 
 // 增强后的节点结构
 export interface EnrichedNode {
@@ -80,7 +91,7 @@ export interface EnrichedGraphData {
  * 
  * 参数：
  *   @param graphData - 后端 causal_analyses.graph_data（仅包含 Factor 和 Target 节点）
- *   @param predictions - Supabase predictions 表数据（含 profiles JOIN）
+ *   @param submissions - Supabase signal_submissions 表数据（含 profiles JOIN，v3.0）
  * 
  * 返回：
  *   @returns 增强后的 EnrichedGraphData，包含 Agent → Signal → Factor → Target 四层结构
@@ -90,13 +101,13 @@ export interface EnrichedGraphData {
  *   1. 检查输入有效性
  *   2. 检测图谱是否已包含 Agent 节点（已增强）
  *   3. 如果已增强，补全缺失的 signal_factor 边后返回
- *   4. 如果未增强，从 predictions 生成 Agent 和 Signal 节点
+ *   4. 如果未增强，从 submissions 生成 Agent 和 Signal 节点
  *   5. 使用关键词匹配将 Signal 连接到 Factor
  *   6. 返回完整的 4 层图谱
  */
 export function enrichGraphData(
   graphData: any,
-  predictions: RawPrediction[] | null | undefined,
+  submissions: RawSignalSubmission[] | null | undefined,
 ): EnrichedGraphData | null {
   // ══════════════════════════════════════════════════════════════
   // Step 1: 输入验证
@@ -107,20 +118,20 @@ export function enrichGraphData(
   // Step 2: 检测图谱是否已包含 Agent 节点
   // ══════════════════════════════════════════════════════════════
   // 说明：如果已有 Agent 节点（来自 Python 引擎，无 profile 数据）
-  // 处理：用 predictions 的 profile 数据就地更新 agent 节点的 name/persona 字段，
+  // 处理：用 submissions 的 profile 数据就地更新 agent 节点的 name/persona 字段，
   //       保留所有边结构（signal_cluster 等）不变
   const hasAgents = graphData.nodes.some((n: any) => n.node_type === 'agent')
   if (hasAgents) {
     const normalized = normalizeTypes(graphData)
-    if (!predictions?.length) return normalized
+    if (!submissions?.length) return normalized
 
     // 构建 userId → profile 映射（用和 enrichGraphData 相同的 agentId 公式）
-    const agentIdToProfile = new Map<string, NonNullable<RawPrediction['profiles']>>()
-    for (const pred of predictions) {
-      const profileRaw = pred.profiles
+    const agentIdToProfile = new Map<string, NonNullable<RawSignalSubmission['profiles']>>()
+    for (const sub of submissions) {
+      const profileRaw = sub.profiles
       const profile = Array.isArray(profileRaw) ? profileRaw[0] ?? null : profileRaw
       if (!profile) continue
-      const agentId = `agent_${pred.user_id.replace(/-/g, '').slice(0, 12)}`
+      const agentId = `agent_${sub.user_id.replace(/-/g, '').slice(0, 12)}`
       if (!agentIdToProfile.has(agentId)) agentIdToProfile.set(agentId, profile)
     }
 
@@ -175,6 +186,13 @@ export function enrichGraphData(
   
   enrichedNodes.push(...existingNodes)
 
+  // 构建已有节点 ID 集合，防止 Step 9 创建重复节点
+  // 根因：当后端数据已包含 signal/agent 节点但 hasAgents=false 时，
+  // Path B 会在已有节点上叠加前端节点，产生相同 ID 的重复节点，
+  // D3 只给其中一个连线，另一个成为孤立节点。
+  const existingNodeIds = new Set(existingNodes.map((n: any) => n.id))
+  const existingEdgeIds = new Set(graphData.edges.map((e: any) => e.id).filter(Boolean))
+
   // ══════════════════════════════════════════════════════════════
   // Step 6: 标记现有边类型
   // ══════════════════════════════════════════════════════════════
@@ -189,10 +207,10 @@ export function enrichGraphData(
   }
 
   // ══════════════════════════════════════════════════════════════
-  // Step 7: 检查是否有预测数据
+  // Step 7: 检查是否有信号提交数据
   // ══════════════════════════════════════════════════════════════
-  // 说明：如果没有预测数据，只返回类型标注后的原始图谱
-  if (!predictions?.length) {
+  // 说明：如果没有信号提交数据，只返回类型标注后的原始图谱
+  if (!submissions?.length) {
     return { ...graphData, nodes: enrichedNodes, edges: enrichedEdges }
   }
 
@@ -205,102 +223,111 @@ export function enrichGraphData(
   const factorSlots = buildFactorSlots(factors)
 
   // ══════════════════════════════════════════════════════════════
-  // Step 9: 生成 Agent 和 Signal 节点
+  // Step 9: 生成 Agent 和 Signal 节点（v3.0: 每个提交包含多条信号）
   // ══════════════════════════════════════════════════════════════
   const seenAgents = new Map<string, string>() // user_id → agent_node_id（去重）
-  let predIdx = 0
+  let sigIdx = 0
 
-  for (const pred of predictions) {
-    const userId = pred.user_id
-    const profileRaw = pred.profiles
+  for (const sub of submissions) {
+    // 跳过弃权提交
+    if (sub.status === 'abstained') continue
+    const signals = sub.signals || []
+    if (signals.length === 0) continue
+
+    const userId = sub.user_id
+    const profileRaw = sub.profiles
     const profile = Array.isArray(profileRaw) ? profileRaw[0] ?? null : profileRaw
-    // 🔍 DEBUG: 打印前3个agent的profile原始值
-    if (predIdx < 3) {
-      console.log(`[enrich] pred[${predIdx}] user_id=${userId}`)
-      console.log(`[enrich] pred[${predIdx}] profileRaw type=${Array.isArray(profileRaw) ? 'array' : typeof profileRaw}`, JSON.stringify(profileRaw)?.slice(0, 200))
-      console.log(`[enrich] pred[${predIdx}] profile.username=${profile?.username} persona_region=${profile?.persona_region}`)
-    }
 
     // ══════════════════════════════════════════════════════════════
-    // 9.1: 创建 Agent 节点（每个用户只创建一次）
+    // 9.1: 创建 Agent 节点（每个用户只创建一次，跳过后端已有的）
     // ══════════════════════════════════════════════════════════════
     let agentId = seenAgents.get(userId)
     if (!agentId) {
       agentId = `agent_${userId.replace(/-/g, '').slice(0, 12)}`
       seenAgents.set(userId, agentId)
 
-      // 根据概率判断立场
-      const stance = pred.probability > 0.6 ? 'bullish'
-        : pred.probability < 0.4 ? 'bearish' : 'neutral'
+      // 跳过后端已创建的 Agent 节点，防止重复 ID 导致孤立节点
+      if (!existingNodeIds.has(agentId)) {
+        // 用第一条信号的类型推断分析风格
+        const firstSig = signals[0]
+        const summaryText = firstSig?.evidence_text || ''
+        const evidenceType = firstSig?.evidence_type || 'persona_inference'
 
-      enrichedNodes.push({
-        id: agentId,
-        name: profile?.username || `Agent-${userId.slice(0, 6)}`,
-        node_type: 'agent',
-        avatar_label: (profile?.username || userId.slice(0, 2)).slice(0, 2).toUpperCase(),
-        persona_region: profile?.persona_region ?? null,
-        persona_gender: profile?.persona_gender ?? null,
-        persona_age_range: profile?.persona_age_range ?? null,
-        persona_occupation: profile?.persona_occupation ?? null,
-        persona_interests: profile?.persona_interests ?? null,
-        persona_summary: buildPersonaSummary(pred.probability, pred.evidence_type, pred.rationale),
-        persona: {
-          stance,
-          expertise: 'general',
-          reputation: profile?.reputation_score || 100,
-        },
-      })
+        enrichedNodes.push({
+          id: agentId,
+          name: profile?.username || `Agent-${userId.slice(0, 6)}`,
+          node_type: 'agent',
+          avatar_label: (profile?.username || userId.slice(0, 2)).slice(0, 2).toUpperCase(),
+          persona_region: profile?.persona_region ?? null,
+          persona_gender: profile?.persona_gender ?? null,
+          persona_age_range: profile?.persona_age_range ?? null,
+          persona_occupation: profile?.persona_occupation ?? null,
+          persona_interests: profile?.persona_interests ?? null,
+          persona_summary: buildPersonaSummaryV3(evidenceType, summaryText),
+          persona: {
+            stance: 'neutral',
+            expertise: 'general',
+            reputation: profile?.reputation_score || 100,
+          },
+        })
+        existingNodeIds.add(agentId)
+      }
     }
 
     // ══════════════════════════════════════════════════════════════
-    // 9.2: 创建 Signal 节点
+    // 9.2: 为每条信号创建 Signal 节点 + 边（跳过后端已有的）
     // ══════════════════════════════════════════════════════════════
-    const signalId = `sig_${pred.id.replace(/-/g, '').slice(0, 12)}`
-    const evidenceType = pred.evidence_type || 'persona_inference'
-    const rationale = pred.rationale || ''
+    for (const sig of signals) {
+      const signalId = sig.signal_id || `sig_${sub.id.replace(/-/g, '').slice(0, 8)}_${sigIdx}`
+      const evidenceType = sig.evidence_type || 'persona_inference'
+      const evidenceText = sig.evidence_text || ''
 
-    enrichedNodes.push({
-      id: signalId,
-      name: rationale.length > 40 ? rationale.slice(0, 40) + '…' : rationale,
-      node_type: 'signal',
-      evidence_type: evidenceType,
-      source_description: rationale,
-      relevance_score: pred.relevance_score ?? 0.5,
-      is_minority: false,
-    })
+      // 跳过后端已创建的 Signal 节点，防止重复 ID 导致孤立节点
+      if (!existingNodeIds.has(signalId)) {
+        enrichedNodes.push({
+          id: signalId,
+          name: evidenceText.length > 40 ? evidenceText.slice(0, 40) + '…' : evidenceText,
+          node_type: 'signal',
+          evidence_type: evidenceType,
+          source_description: evidenceText,
+          relevance_score: sig.relevance_score ?? 0.5,
+          relevance_reasoning: sig.relevance_reasoning || '',
+          data_exclusivity: sig.data_exclusivity || 'public',
+          source_type: sig.source_type || '',
+          is_minority: false,
+        })
+        existingNodeIds.add(signalId)
+      }
 
-    // ══════════════════════════════════════════════════════════════
-    // 9.3: 创建 Agent → Signal 边
-    // ══════════════════════════════════════════════════════════════
-    enrichedEdges.push({
-      id: `e_as_${predIdx}`,
-      source: agentId,
-      target: signalId,
-      edge_type: 'agent_signal',
-      weight: evidenceType === 'hard_fact' ? 1.0 : 0.5,
-      direction: pred.probability > 0.5 ? 'positive' : 'negative',
-    })
+      // Agent → Signal 边（避免重复边）
+      const asEdgeId = `e_as_${sigIdx}`
+      if (!existingEdgeIds.has(asEdgeId)) {
+        enrichedEdges.push({
+          id: asEdgeId,
+          source: agentId!,
+          target: signalId,
+          edge_type: 'agent_signal',
+          weight: evidenceType === 'hard_fact' ? 1.0 : 0.5,
+        })
+      }
 
-    // ══════════════════════════════════════════════════════════════
-    // 9.4: 创建 Signal → Factor 边
-    // ══════════════════════════════════════════════════════════════
-    // 说明：使用关键词匹配找到最合适的 Factor
-    // 策略：
-    //   1. 优先使用关键词匹配（rationale 和 entity_tags）
-    //   2. 如果匹配分数过低，按容量权重轮转分配
-    const matchedFactorId = matchSignalToFactor(pred, factors, factorSlots, predIdx)
-    if (matchedFactorId) {
-      enrichedEdges.push({
-        id: `e_sf_${predIdx}`,
-        source: signalId,
-        target: matchedFactorId,
-        edge_type: 'signal_factor',
-        weight: pred.relevance_score ?? 0.5,
-        direction: pred.probability > 0.5 ? 'positive' : 'negative',
-      })
+      // Signal → Factor 边（关键词匹配）
+      const matchedFactorId = matchSignalToFactor(sig, factors, factorSlots, sigIdx)
+      if (matchedFactorId) {
+        const sfEdgeId = `e_sf_${sigIdx}`
+        if (!existingEdgeIds.has(sfEdgeId)) {
+          enrichedEdges.push({
+            id: sfEdgeId,
+            source: signalId,
+            target: matchedFactorId,
+            edge_type: 'signal_factor',
+            weight: sig.relevance_score ?? 0.5,
+          })
+        }
+      }
+
+      sigIdx++
     }
-
-    predIdx++
   }
 
   return { ...graphData, nodes: enrichedNodes, edges: enrichedEdges }
@@ -337,7 +364,10 @@ function normalizeTypes(graphData: any): EnrichedGraphData {
     const tgtId = typeof e.target === 'string' ? e.target : e.target?.id
     return { ...e, edge_type: tgtId === targetId ? 'factor_target' : 'factor_factor' }
   })
-  return { ...graphData, nodes, edges }
+  const result: any = { ...graphData, nodes, edges }
+  delete result.cluster_nodes
+  delete result.cluster_edges
+  return result as EnrichedGraphData
 }
 
 /**
@@ -377,15 +407,16 @@ function buildFactorSlots(factors: EnrichedNode[]): Map<string, number> {
  * 返回：匹配的 Factor ID，或 null
  */
 function matchSignalToFactor(
-  pred: RawPrediction,
+  sig: RawSignal | RawSignalSubmission | any,
   factors: EnrichedNode[],
   slots: Map<string, number>,
   idx: number,
 ): string | null {
   if (factors.length === 0) return null
 
-  const rationale = (pred.rationale || '').toLowerCase()
-  const entityTexts = (pred.entity_tags || []).map(t => t.text.toLowerCase())
+  // v3.0: 使用 evidence_text + relevance_reasoning
+  const rationale = (sig.evidence_text || '').toLowerCase()
+  const entityTexts = (sig.entity_tags || []).map((t: any) => t.text.toLowerCase())
 
   // ══════════════════════════════════════════════════════════════
   // 策略 1: 关键词匹配
@@ -401,7 +432,7 @@ function matchSignalToFactor(
     if (fname.length > 2 && rationale.includes(fname)) score += 10
     
     // 规则 2: rationale 关键词在 Factor 名称/描述中
-    const words = rationale.split(/\s+/).filter(w => w.length > 2)
+    const words = rationale.split(/\s+/).filter((w: string) => w.length > 2)
     for (const w of words.slice(0, 15)) {
       if (fname.includes(w)) score += 3  // 名称匹配权重高
       if (fdesc.includes(w)) score += 1  // 描述匹配权重低
@@ -436,21 +467,13 @@ function matchSignalToFactor(
  * 辅助函数：buildPersonaSummary
  * 功能：根据预测数据推导匹名用户画像描述（不展示真实身份）
  */
-function buildPersonaSummary(probability: number, evidenceType?: string, rationale?: string): string {
-  const text = (rationale || '').toLowerCase()
-
-  // 1. 分析风格
+/**
+ * v3.0 版本的画像摘要：基于数据因子类型和证据内容
+ */
+function buildPersonaSummaryV3(evidenceType?: string, evidenceText?: string): string {
+  const text = (evidenceText || '').toLowerCase()
   const style = evidenceType === 'hard_fact' ? '数据驱动型' : '经验直觉型'
 
-  // 2. 立场表述
-  const stanceDesc =
-    probability >= 0.8 ? '立场鲜明看多'
-    : probability >= 0.6 ? '偏向看多'
-    : probability <= 0.2 ? '立场鲜明看空'
-    : probability <= 0.4 ? '偏向看空'
-    : '审慎中性'
-
-  // 3. 关注领域（关键词检测）
   const domainMap: [string[], string][] = [
     [['ai', '人工智能', '技术', '科技', '软件', '算法'], '科技创新'],
     [['政策', '监管', '法规', '政府', '立法'], '政策监管'],
@@ -467,5 +490,5 @@ function buildPersonaSummary(probability: number, evidenceType?: string, rationa
   }
 
   const domainStr = domains.length > 0 ? `，关注${domains.join('与')}` : ''
-  return `${style}，${stanceDesc}${domainStr}。`
+  return `${style}${domainStr}。`
 }

@@ -40,6 +40,8 @@ interface CausalGraphViewerProps {
   graphData: GraphData | null
   className?: string
   isUpdating?: boolean
+  analysisConfidence?: number
+  analysisDirectionLabel?: string
 }
 
 interface SelectedItem { type: 'node' | 'edge'; data: any; color?: string }
@@ -105,6 +107,8 @@ export default function CausalGraphViewer({
   graphData,
   className = '',
   isUpdating = false,
+  analysisConfidence,
+  analysisDirectionLabel,
 }: CausalGraphViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -149,11 +153,14 @@ export default function CausalGraphViewer({
     svg.selectAll('*').remove()
     if (!hasRendered) setHasRendered(true)
 
-    // ── 数据准备 ──
-    const allNodes = graphData.nodes.map((n: any) => ({
-      ...n,
-      node_type: n.node_type || (n.is_target ? 'target' : 'factor') as NodeType,
-    }))
+    // ── 数据准备（按 ID 去重，防止上游产生重复节点导致孤立渲染）──
+    const dedupMap = new Map<string, any>()
+    for (const n of graphData.nodes) {
+      if (!dedupMap.has(n.id)) {
+        dedupMap.set(n.id, { ...n, node_type: n.node_type || (n.is_target ? 'target' : 'factor') as NodeType })
+      }
+    }
+    const allNodes = Array.from(dedupMap.values())
     const nodeIds = new Set(allNodes.map((n: any) => n.id))
     const allEdges = graphData.edges
       .filter((e: any) => nodeIds.has(e.source) && nodeIds.has(e.target))
@@ -620,7 +627,7 @@ export default function CausalGraphViewer({
       .attr('fill', TARGET_COLOR).attr('font-size', '9px').attr('font-weight', '600')
       .style('font-family', 'system-ui').style('pointer-events', 'none')
     targetG.append('text')
-      .text((d: any) => `置信度 ${((d.confidence || 0) * 100).toFixed(0)}%`)
+      .text((d: any) => `置信度 ${analysisConfidence != null ? Math.round(analysisConfidence * 100) : ((d.confidence || 0) * 100).toFixed(0)}%`)
       .attr('y', (d: any) => d._size + 22).attr('text-anchor', 'middle')
       .attr('fill', '#888').attr('font-size', '7px')
       .style('font-family', 'system-ui').style('pointer-events', 'none')
@@ -937,15 +944,38 @@ export default function CausalGraphViewer({
                 )}
                 <div className="flex justify-between items-center">
                   <span className="text-gray-500">推演方向</span>
-                  <DirectionBadge direction={selectedItem.data.evidence_direction} />
+                  {analysisDirectionLabel ? (
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                      selectedItem.data.evidence_direction === 'bullish'
+                        ? 'bg-emerald-500/20 text-emerald-300'
+                        : selectedItem.data.evidence_direction === 'bearish'
+                        ? 'bg-rose-500/20 text-rose-300'
+                        : 'bg-zinc-600/30 text-zinc-400'
+                    }`}>{analysisDirectionLabel}</span>
+                  ) : (
+                    <DirectionBadge direction={selectedItem.data.evidence_direction} />
+                  )}
                 </div>
                 <PanelSection label="综合证据" />
-                <ScoreBar label="置信度" value={selectedItem.data.confidence || 0} />
-                <DetailRow label="证据总量" value={`${selectedItem.data.total_evidence_count || 0} 条`} />
-                <DetailRow label="硬核事实" value={`${selectedItem.data.hard_fact_count || 0} 条`} />
-                <DetailRow label="画像推演" value={`${selectedItem.data.persona_count || 0} 条`} />
+                <ScoreBar label="综合置信度" value={analysisConfidence ?? selectedItem.data.confidence ?? 0} />
+                {analysisConfidence != null && (
+                  <ScoreBar label="拓扑传播置信度" value={selectedItem.data.confidence || 0} />
+                )}
+                {(() => {
+                  const sigNodes = graphData?.nodes.filter(n => n.node_type === 'signal') ?? []
+                  const totalSig = sigNodes.length
+                  const hardFacts = sigNodes.filter(n => n.evidence_type === 'hard_fact').length
+                  const personas = sigNodes.filter(n => n.evidence_type === 'persona_inference').length
+                  return (
+                    <>
+                      <DetailRow label="参与推演信号" value={`${totalSig} 条`} />
+                      <DetailRow label="硬核事实" value={`${hardFacts} 条`} />
+                      <DetailRow label="画像推演" value={`${personas} 条`} />
+                    </>
+                  )
+                })()}
                 <PanelSection label="推理说明" />
-                <TextBlock>置信度由所有影响因子经拓扑排序传播后的加权平均计算，反映整个因果网络对该预测目标的综合支撑强度。</TextBlock>
+                <TextBlock>综合置信度由 LLM 推演引擎基于完整因果链、冲突消解与硬核事实综合评定；拓扑传播置信度反映图网络信号衰减强度。目标节点证据为全部参与推演的信号汇总。</TextBlock>
               </>
             ) : selectedItem.type === 'node' ? (
               <>

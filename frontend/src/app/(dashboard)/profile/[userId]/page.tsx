@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import ProfileView from '@/components/profile/profile-view'
+import { fetchProfileData } from '@/services/profile'
 
 export default async function PublicProfilePage({
   params,
@@ -8,39 +9,13 @@ export default async function PublicProfilePage({
   params: { userId: string }
 }) {
   const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+  if (user.id === params.userId) redirect('/profile')
 
-  // Check authentication
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const result = await fetchProfileData(params.userId)
 
-  if (!user) {
-    redirect('/login')
-  }
-
-  // If viewing own profile, redirect to /profile
-  if (user.id === params.userId) {
-    redirect('/profile')
-  }
-
-  // Fetch public profile data
-  const response = await fetch(
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/get-public-profile?userId=${params.userId}`,
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-      },
-      cache: 'no-store',
-    }
-  )
-
-  let profileData = null
-  if (response.ok) {
-    const data = await response.json()
-    profileData = data.profile
-  }
-
-  if (!profileData) {
+  if (!result) {
     return (
       <div className="min-h-screen bg-[#0a0e27] text-gray-100 flex items-center justify-center">
         <div className="text-center">
@@ -51,5 +26,5 @@ export default async function PublicProfilePage({
     )
   }
 
-  return <ProfileView profile={profileData} isOwnProfile={false} />
+  return <ProfileView profile={result.profile} isOwnProfile={false} />
 }

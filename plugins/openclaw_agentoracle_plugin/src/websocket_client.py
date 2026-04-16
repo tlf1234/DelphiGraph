@@ -18,8 +18,10 @@ from datetime import datetime
 # Support both module and direct execution
 try:
     from .logger import setup_logger
+    from .device_identity import DeviceIdentity
 except ImportError:
     from logger import setup_logger
+    from device_identity import DeviceIdentity
 
 
 class OpenClawWebSocketClient:
@@ -31,7 +33,9 @@ class OpenClawWebSocketClient:
                  timeout: int = 300,
                  max_retries: int = 3,
                  connect_timeout: int = 10,
-                 message_timeout: int = 20):
+                 message_timeout: int = 20,
+                 use_device_identity: bool = True,
+                 device_identity_file: str = "device_identity.json"):
         """Initialize WebSocket client.
         
         Args:
@@ -41,6 +45,8 @@ class OpenClawWebSocketClient:
             max_retries: Maximum number of retry attempts (default: 3)
             connect_timeout: Connection timeout in seconds (default: 10)
             message_timeout: Single message timeout in seconds (default: 20)
+            use_device_identity: Use device identity for OpenClaw 4.x (default: True)
+            device_identity_file: Path to device identity file (default: device_identity.json)
         """
         self.gateway_url = gateway_url
         self.gateway_token = gateway_token
@@ -48,7 +54,20 @@ class OpenClawWebSocketClient:
         self.max_retries = max_retries
         self.connect_timeout = connect_timeout
         self.message_timeout = message_timeout
+        self.use_device_identity = use_device_identity
         self.logger = setup_logger()
+        
+        # Initialize device identity for OpenClaw 4.x
+        self.device_identity = None
+        if use_device_identity:
+            try:
+                self.device_identity = DeviceIdentity(device_identity_file)
+                self.device_identity.load_or_create_identity()
+                self.logger.info("[AgentOracle] 🔐 Device Identity 已启用（OpenClaw 4.x 正规方式）")
+            except Exception as e:
+                self.logger.warning(f"[AgentOracle] ⚠️  Device Identity 初始化失败: {e}")
+                self.logger.warning("[AgentOracle] ⚠️  将回退到无 device identity 模式（需要 Gateway 配置支持）")
+                self.device_identity = None
         
         # Retry delay base (exponential backoff)
         self.retry_delay_base = 2
@@ -107,6 +126,9 @@ class OpenClawWebSocketClient:
                     
                     # Step 2: Send connect request
                     connect_id = str(uuid.uuid4())
+                    CONNECT_CLIENT_ID = "cli"
+                    CONNECT_CLIENT_MODE = "cli"
+                    CONNECT_SCOPES = ["operator.read", "operator.write"]
                     connect_request = {
                         "type": "req",
                         "id": connect_id,
@@ -115,13 +137,13 @@ class OpenClawWebSocketClient:
                             "minProtocol": 3,
                             "maxProtocol": 3,
                             "client": {
-                                "id": "cli",  # Must be 'cli' as required by OpenClaw Gateway
+                                "id": CONNECT_CLIENT_ID,
                                 "version": "1.0.0",
                                 "platform": "windows",
-                                "mode": "cli"  # Must be 'cli' as required by OpenClaw Gateway
+                                "mode": CONNECT_CLIENT_MODE
                             },
                             "role": "operator",
-                            "scopes": ["operator.read", "operator.write"],
+                            "scopes": CONNECT_SCOPES,
                             "caps": [],
                             "commands": [],
                             "permissions": {},
@@ -130,11 +152,30 @@ class OpenClawWebSocketClient:
                         }
                     }
                     
-                    # Add authentication if token is provided
+                    # Add device identity if available (OpenClaw 4.x proper way)
+                    # client_id/client_mode/scopes MUST match what's in the connect request
+                    if self.device_identity:
+                        device_params = self.device_identity.get_device_params(
+                            role="operator",
+                            scopes=CONNECT_SCOPES,
+                            nonce=nonce,
+                            client_id=CONNECT_CLIENT_ID,
+                            client_mode=CONNECT_CLIENT_MODE,
+                            platform="windows",
+                            gateway_token=self.gateway_token
+                        )
+                        connect_request["params"].update(device_params)
+                        self.logger.info(f"[AgentOracle] 🔐 使用 Device Identity 认证（设备 ID: {self.device_identity.device_id[:16]}...）")
+                    
+                    # Add authentication token if provided
                     if self.gateway_token:
                         connect_request["params"]["auth"] = {
                             "token": self.gateway_token
                         }
+                        self.logger.info(f"[AgentOracle] 🔑 携带 gateway_token 长度={len(self.gateway_token)} 前8位={self.gateway_token[:8]}...")
+                    else:
+                        if not self.device_identity:
+                            self.logger.warning("[AgentOracle] ⚠️  未配置 gateway_token 且无 device identity，将以无 auth 模式连接")
                     
                     self.logger.info("[AgentOracle] 📤 发送 connect 请求...")
                     await websocket.send(json.dumps(connect_request))
@@ -148,10 +189,21 @@ class OpenClawWebSocketClient:
                     connect_response = json.loads(connect_response_msg)
                     
                     if connect_response.get("type") != "res" or not connect_response.get("ok"):
-                        error = connect_response.get("error", "未知错误")
+                        error = connect_response.get("error", {})
+                        error_code = error.get("code", "") if isinstance(error, dict) else ""
+                        error_details = error.get("details", {}) if isinstance(error, dict) else {}
+                        detail_code = error_details.get("code", "") if isinstance(error_details, dict) else ""
+                        if error_code == "NOT_PAIRED" or detail_code == "PAIRING_REQUIRED":
+                            pairing_req_id = error_details.get("requestId", "未知") if isinstance(error_details, dict) else "未知"
+                            self.logger.error("[AgentOracle] ❌ 设备配对未完成！")
+                            self.logger.error(f"[AgentOracle] 📋 配对请求 ID: {pairing_req_id}")
+                            self.logger.error("[AgentOracle] 👉 请在 OpenClaw Control UI 中批准此设备的配对请求，然后重试")
+                            raise Exception(f"设备需要配对 (pairing required). 请在 OpenClaw Control UI 中批准配对请求 ID={pairing_req_id}")
                         raise Exception(f"连接失败: {error}")
                     
                     self.logger.info("[AgentOracle] ✅ 连接成功！")
+                    import json as _json
+                    self.logger.info(f"[AgentOracle] 🔐 完整 connect 响应: {_json.dumps(connect_response, ensure_ascii=False)[:2000]}")
                     
                     # Step 4: Use main session (same as daily_elf)
                     # Extract mainSessionKey from connect response, fallback to agent:main:main
@@ -229,8 +281,18 @@ class OpenClawWebSocketClient:
                                                     self.logger.info(f"[AgentOracle] ✨ 收到更新 (已接收 {reply_len} 字符, state={state})")
                                     
                                     # Check if completed
-                                    if state in ["final", "done", "complete", "finished"]:
+                                    # Terminal states per openclaw ChatEventSchema:
+                                    # "final" = success, "aborted" = cancelled, "error" = failed
+                                    if state == "final":
                                         self.logger.info(f"[AgentOracle] ✅ 聊天完成 (state: {state})")
+                                        chat_completed = True
+                                        break
+                                    elif state in ["aborted", "error"]:
+                                        err_msg = payload.get("errorMessage", "")
+                                        self.logger.warning(
+                                            f"[AgentOracle] ⚠️  聊天终止 (state: {state}"
+                                            + (f", reason: {err_msg}" if err_msg else "") + ")"
+                                        )
                                         chat_completed = True
                                         break
                         

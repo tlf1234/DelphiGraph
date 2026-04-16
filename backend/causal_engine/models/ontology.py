@@ -73,21 +73,21 @@ class CausalRelationType:
 class CausalOntology:
     """因果本体定义"""
     task_id: str
-    market_query: str
+    task_query: str
     factor_types: List[CausalFactorType]
     relation_types: List[CausalRelationType]
     raw_causal_relations: List[Dict] = field(default_factory=list)
-    prediction_target: str = ""       # 预测目标因子名称
+    analysis_target: str = ""       # 分析目标因子名称
     generated_at: str = ""
 
     def to_dict(self) -> Dict:
         return {
             "task_id": self.task_id,
-            "market_query": self.market_query,
+            "task_query": self.task_query,
             "factor_types": [f.to_dict() for f in self.factor_types],
             "relation_types": [r.to_dict() for r in self.relation_types],
             "raw_causal_relations": self.raw_causal_relations,
-            "prediction_target": self.prediction_target,
+            "analysis_target": self.analysis_target,
             "generated_at": self.generated_at,
         }
 
@@ -98,12 +98,12 @@ class CausalOntology:
             errors.append(
                 f"因子数量 {len(self.factor_types)} 不在 3-12 范围内"
             )
-        if not self.prediction_target:
-            errors.append("缺少预测目标因子")
+        if not self.analysis_target:
+            errors.append("缺少分析目标因子")
         else:
             factor_names = {f.name for f in self.factor_types}
-            if self.prediction_target not in factor_names:
+            if self.analysis_target not in factor_names:
                 errors.append(
-                    f"预测目标因子 '{self.prediction_target}' 不在因子列表中"
+                    f"分析目标因子 '{self.analysis_target}' 不在因子列表中"
                 )
         return errors

@@ -7,12 +7,12 @@ import { TrendingUp, TrendingDown, DollarSign, Target, CheckCircle, XCircle, Clo
 
 interface EarningsRecord {
   task_id: string
-  market_title: string
-  market_question: string
-  prediction_probability: number
-  prediction_rationale: string
+  task_title: string
+  task_question: string
+  signal_probability: number
+  signal_rationale: string
   predicted_at: string
-  market_outcome: boolean | null
+  task_outcome: boolean | null
   was_correct: boolean | null
   earnings: number
   reputation_change: number
@@ -21,11 +21,11 @@ interface EarningsRecord {
 
 interface EarningsSummary {
   total_earnings: number
-  total_markets: number
-  resolved_markets: number
-  correct_predictions: number
-  incorrect_predictions: number
-  pending_markets: number
+  total_tasks: number
+  resolved_tasks: number
+  correct_submissions: number
+  incorrect_submissions: number
+  pending_tasks: number
   accuracy_rate: string
 }
 
@@ -76,7 +76,7 @@ export default function EarningsView() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-100">收益历史</h1>
-          <p className="text-gray-400 mt-1">查看您在每个市场的收益明细</p>
+          <p className="text-gray-400 mt-1">查看您在每个任务的收益明细</p>
         </div>
       </div>
 
@@ -95,7 +95,7 @@ export default function EarningsView() {
                 ¥{summary.total_earnings.toFixed(2)}
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                来自 {summary.resolved_markets} 个已结算市场
+                来自 {summary.resolved_tasks} 个已结算任务
               </p>
             </CardContent>
           </Card>
@@ -112,7 +112,7 @@ export default function EarningsView() {
                 {summary.accuracy_rate}%
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                {summary.correct_predictions}/{summary.resolved_markets} 正确
+                {summary.correct_submissions}/{summary.resolved_tasks} 正确
               </p>
             </CardContent>
           </Card>
@@ -121,15 +121,15 @@ export default function EarningsView() {
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-gray-400 flex items-center gap-2">
                 <CheckCircle className="h-4 w-4" />
-                正确预测
+                正确提交
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-green-400">
-                {summary.correct_predictions}
+                {summary.correct_submissions}
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                信誉分 +{summary.correct_predictions * 10}
+                信誉分 +{summary.correct_submissions * 10}
               </p>
             </CardContent>
           </Card>
@@ -138,15 +138,15 @@ export default function EarningsView() {
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-gray-400 flex items-center gap-2">
                 <XCircle className="h-4 w-4" />
-                错误预测
+                错误提交
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-red-400">
-                {summary.incorrect_predictions}
+                {summary.incorrect_submissions}
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                信誉分 {summary.incorrect_predictions * -20}
+                信誉分 {summary.incorrect_submissions * -20}
               </p>
             </CardContent>
           </Card>
@@ -158,7 +158,7 @@ export default function EarningsView() {
         <CardHeader>
           <CardTitle className="text-gray-100">收益明细</CardTitle>
           <CardDescription>
-            所有市场的预测和收益记录
+            所有任务的信号提交和收益记录
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -166,7 +166,7 @@ export default function EarningsView() {
             <div className="text-center py-12 text-gray-400">
               <Target className="h-16 w-16 mx-auto mb-4 text-gray-600" />
               <p className="text-lg">暂无收益记录</p>
-              <p className="text-sm mt-2">参与预测市场后，收益将显示在这里</p>
+              <p className="text-sm mt-2">参与信号提交后，收益将显示在这里</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -178,14 +178,14 @@ export default function EarningsView() {
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1">
                       <h3 className="font-medium text-gray-100 mb-1">
-                        {record.market_title}
+                        {record.task_title}
                       </h3>
                       <p className="text-sm text-gray-400 mb-2">
-                        {record.market_question}
+                        {record.task_question}
                       </p>
                       <div className="flex items-center gap-4 text-xs text-gray-500">
                         <span>
-                          预测时间: {new Date(record.predicted_at).toLocaleDateString('zh-CN')}
+                          提交时间: {new Date(record.predicted_at).toLocaleDateString('zh-CN')}
                         </span>
                         {record.settled_at && (
                           <>
@@ -219,23 +219,23 @@ export default function EarningsView() {
                     </div>
                   </div>
 
-                  {/* Prediction Details */}
+                  {/* Submission Details */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-3 border-t border-[#2a3f5f]">
                     <div>
-                      <div className="text-xs text-gray-500 mb-1">我的预测</div>
+                      <div className="text-xs text-gray-500 mb-1">我的提交</div>
                       <div className="text-lg font-medium text-gray-200">
-                        {record.prediction_probability >= 0.5 ? 'Yes' : 'No'}
+                        {record.signal_probability >= 0.5 ? 'Yes' : 'No'}
                         <span className="text-sm text-gray-400 ml-2">
-                          ({(record.prediction_probability * 100).toFixed(0)}%)
+                          ({(record.signal_probability * 100).toFixed(0)}%)
                         </span>
                       </div>
                     </div>
 
-                    {record.market_outcome !== null && (
+                    {record.task_outcome !== null && (
                       <div>
                         <div className="text-xs text-gray-500 mb-1">实际结果</div>
                         <div className="text-lg font-medium text-gray-200">
-                          {record.market_outcome ? 'Yes' : 'No'}
+                          {record.task_outcome ? 'Yes' : 'No'}
                         </div>
                       </div>
                     )}
@@ -269,11 +269,11 @@ export default function EarningsView() {
                   </div>
 
                   {/* Rationale */}
-                  {record.prediction_rationale && (
+                  {record.signal_rationale && (
                     <div className="mt-3 pt-3 border-t border-[#2a3f5f]">
                       <div className="text-xs text-gray-500 mb-1">推理说明</div>
                       <p className="text-sm text-gray-400 line-clamp-2">
-                        {record.prediction_rationale}
+                        {record.signal_rationale}
                       </p>
                     </div>
                   )}

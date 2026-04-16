@@ -3,8 +3,8 @@
 -- 调查模块独立表结构，与预测模块（markets/predictions/causal_analyses）完全隔离
 -- ══════════════════════════════════════════════════════════════════════
 
--- ── 1. surveys（调查主表）──────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS surveys (
+-- ── 1. survey_tasks（调查主表）──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS survey_tasks (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title           TEXT NOT NULL,
     description     TEXT,
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS surveys (
 -- ── 2. survey_questions（调查题目，支持多题问卷）──────────────────────
 CREATE TABLE IF NOT EXISTS survey_questions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    survey_id       UUID NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+    survey_id       UUID NOT NULL REFERENCES survey_tasks(id) ON DELETE CASCADE,
     -- 题目顺序（从1开始）
     question_order  INT NOT NULL DEFAULT 1,
     question_text   TEXT NOT NULL,
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS survey_questions (
 -- ── 3. survey_responses（Agent 回答，独立存储）────────────────────────
 CREATE TABLE IF NOT EXISTS survey_responses (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    survey_id       UUID NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+    survey_id       UUID NOT NULL REFERENCES survey_tasks(id) ON DELETE CASCADE,
     question_id     UUID NOT NULL REFERENCES survey_questions(id) ON DELETE CASCADE,
     -- Agent 画像快照（回答时刻的完整画像，不依赖 profiles 表）
     agent_persona   JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS survey_responses (
 -- ── 4. survey_analyses（聚合分析结果，独立于 causal_analyses）─────────
 CREATE TABLE IF NOT EXISTS survey_analyses (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    survey_id               UUID NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+    survey_id               UUID NOT NULL REFERENCES survey_tasks(id) ON DELETE CASCADE,
     -- 每道题单独一条分析记录（NULL 表示全卷汇总）
     question_id             UUID REFERENCES survey_questions(id) ON DELETE CASCADE,
     -- 回答分布，格式：{"option_a": 0.45, "option_b": 0.32, "option_c": 0.23}
@@ -89,9 +89,9 @@ CREATE TABLE IF NOT EXISTS survey_analyses (
 );
 
 -- ── 索引 ──────────────────────────────────────────────────────────────
-CREATE INDEX IF NOT EXISTS idx_surveys_creator      ON surveys(creator_id);
-CREATE INDEX IF NOT EXISTS idx_surveys_status       ON surveys(status);
-CREATE INDEX IF NOT EXISTS idx_surveys_created_at   ON surveys(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_survey_tasks_creator      ON survey_tasks(creator_id);
+CREATE INDEX IF NOT EXISTS idx_survey_tasks_status       ON survey_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_survey_tasks_created_at   ON survey_tasks(created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_survey_questions_survey_id
     ON survey_questions(survey_id, question_order);
@@ -109,17 +109,17 @@ CREATE INDEX IF NOT EXISTS idx_survey_analyses_question_id
     ON survey_analyses(question_id);
 
 -- ── RLS（Row Level Security）──────────────────────────────────────────
-ALTER TABLE surveys          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE survey_tasks          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE survey_questions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE survey_responses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE survey_analyses  ENABLE ROW LEVEL SECURITY;
 
--- surveys: 所有已登录用户可读；只有创建者可修改
-CREATE POLICY "surveys_select" ON surveys
+-- survey_tasks: 所有已登录用户可读；只有创建者可修改
+CREATE POLICY "survey_tasks_select" ON survey_tasks
     FOR SELECT TO authenticated USING (true);
-CREATE POLICY "surveys_insert" ON surveys
+CREATE POLICY "survey_tasks_insert" ON survey_tasks
     FOR INSERT TO authenticated WITH CHECK (auth.uid() = creator_id);
-CREATE POLICY "surveys_update" ON surveys
+CREATE POLICY "survey_tasks_update" ON survey_tasks
     FOR UPDATE TO authenticated USING (auth.uid() = creator_id);
 
 -- survey_questions: 跟随所属 survey 的权限
@@ -128,7 +128,7 @@ CREATE POLICY "survey_questions_select" ON survey_questions
 CREATE POLICY "survey_questions_insert" ON survey_questions
     FOR INSERT TO authenticated
     WITH CHECK (
-        EXISTS (SELECT 1 FROM surveys WHERE id = survey_id AND creator_id = auth.uid())
+        EXISTS (SELECT 1 FROM survey_tasks WHERE id = survey_id AND creator_id = auth.uid())
     );
 
 -- survey_responses / survey_analyses: 所有登录用户可读（分析结果公开）

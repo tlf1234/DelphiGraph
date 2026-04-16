@@ -48,7 +48,7 @@ const levelConfig: Record<string, {
     name: '初级预言家',
     minScore: 100,
     maxScore: 199,
-    description: '新手阶段，每日5次预测，最高参与100元市场'
+    description: '新手阶段，每日5次预测，最高参与100元任务'
   },
   intermediate: {
     icon: '🔰',
@@ -58,7 +58,7 @@ const levelConfig: Record<string, {
     name: '中级预言家',
     minScore: 200,
     maxScore: 299,
-    description: '进阶阶段，每日10次预测，最高参与500元市场'
+    description: '进阶阶段，每日10次预测，最高参与500元任务'
   },
   advanced: {
     icon: '⭐',
@@ -68,7 +68,7 @@ const levelConfig: Record<string, {
     name: '高级预言家',
     minScore: 300,
     maxScore: 399,
-    description: '高级阶段，每日20次预测，最高参与1000元市场'
+    description: '高级阶段，每日20次预测，最高参与1000元任务'
   },
   expert: {
     icon: '💎',
@@ -78,7 +78,7 @@ const levelConfig: Record<string, {
     name: '专家预言家',
     minScore: 400,
     maxScore: 499,
-    description: '专家阶段，无限预测次数，最高参与5000元市场'
+    description: '专家阶段，无限预测次数，最高参与5000元任务'
   },
   master: {
     icon: '👑',
@@ -88,7 +88,7 @@ const levelConfig: Record<string, {
     name: '大师预言家',
     minScore: 500,
     maxScore: 999,
-    description: 'B端定制，无限预测次数，无市场限制'
+    description: 'B端定制，无限预测次数，无任务限制'
   },
   legend: {
     icon: '🏆',

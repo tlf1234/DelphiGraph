@@ -11,18 +11,18 @@
    // ❌ 不规范：组件直接调用
    fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/database/create-quest`)
    ```
-   - `market-creation-form.tsx`
+   - `task-creation-form.tsx`
    - `purgatory-view.tsx`
    - `earnings-view.tsx`
-   - `market-detail-with-nda.tsx`
+   - `task-detail-with-nda.tsx`
 
 2. **组件直接调用 Supabase Client**
    ```typescript
    // ❌ 不规范：组件直接操作数据库
    const supabase = createClient()
-   supabase.from('markets').select('*')
+   supabase.from('tasks').select('*')
    ```
-   - `market-detail-client.tsx`
+   - `task-detail-client.tsx`
    - `settings` 组件
    - `auth` 组件
 
@@ -140,7 +140,7 @@ frontend/src/app/api/
    - `POST /api/predictions/submit` - 提交预测
    - `GET /api/predictions` - 获取我的预测
 
-4. **创建炼狱模式 API**
+4. **创建涅槃模式 API**
    - `GET /api/purgatory/tasks` - 获取校准任务
    - `POST /api/purgatory/submit` - 提交校准答案
 
@@ -194,7 +194,7 @@ export async function apiRequest(url: string, options?: RequestInit) {
 
 ### 立即执行（高优先级）
 1. 创建核心 API Routes（searchs, profile, predictions）
-2. 更新关键组件（market-creation-form, purgatory-view）
+2. 更新关键组件（task-creation-form, purgatory-view）
 3. 添加统一的 API 客户端工具
 
 ### 后续优化（中优先级）

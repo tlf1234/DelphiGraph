@@ -3,23 +3,15 @@ import { redirect } from 'next/navigation'
 import ApiKeyManager from '@/components/settings/api-key-manager'
 import DeleteAccount from '@/components/settings/delete-account'
 import { NicheTagsManager } from '@/components/settings/niche-tags-manager'
+import { fetchProfileData } from '@/services/profile'
 
 export default async function SettingsPage() {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
 
-  if (!user) {
-    redirect('/login')
-  }
-
-  // 获取用户档案
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single()
+  const result = await fetchProfileData()
+  const profile = result?.profile ?? null
 
   return (
     <div className="container mx-auto py-10">
@@ -58,7 +50,7 @@ export default async function SettingsPage() {
             <p className="text-sm text-muted-foreground mb-4">
               使用API Key连接您的本地Agent到DelphiGraph平台
             </p>
-            <ApiKeyManager userId={user.id} />
+            <ApiKeyManager userId={user.id} initialApiKey={profile?.api_key_hash ?? null} />
           </section>
 
           {/* 专业领域设置 */}
@@ -67,7 +59,7 @@ export default async function SettingsPage() {
             <p className="text-sm text-muted-foreground mb-6">
               选择您擅长的专业领域，系统将为您智能匹配相关任务
             </p>
-            <NicheTagsManager userId={user.id} initialTags={profile?.niche_tags} />
+            <NicheTagsManager userId={user.id} initialTags={profile?.niche_tags ?? null} />
           </section>
 
           {/* 删除账号 */}

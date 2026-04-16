@@ -11,8 +11,8 @@
 // 功能：准备 UAP 模拟测试环境
 // 用途：
 //   1. 创建或复用 100 个模拟 Agent 账号
-//   2. 清除指定 market 的历史数据（predictions + causal_analyses）
-//   3. 重置 market 状态为初始状态
+//   2. 清除指定 task 的历史数据（signal_submissions + causal_analyses）
+//   3. 重置 task 状态为初始状态
 // 调用时机：模拟测试开始前（Step 1）
 // 请求方法：POST
 // 请求体：{ task_id: string }
@@ -187,53 +187,60 @@ export async function POST(request: NextRequest) {
 
   try {
     // ══════════════════════════════════════════════════════════════
-    // Step 2: 清除历史预测数据
+    // Step 2: 清除历史信号提交数据
     // ══════════════════════════════════════════════════════════════
-    // 说明：删除该 market 的所有预测记录
-    // 表：predictions
+    // 说明：删除该 market 的所有信号提交记录
+    // 表：signal_submissions
     // 条件：task_id = 指定的 market ID
+    let deletedSignals = 0
+    let deletedAnalyses = 0
     if (task_id) {
       console.log('[test/prepare] 🗑 Cleaning historical data...')
-      console.log('[test/prepare]   Target market:', task_id)
-      
-      const { error: delPredErr } = await adminSupabase
-        .from('predictions')
-        .delete()
-        .eq('task_id', task_id)
-      if (delPredErr) {
-        console.error('[test/prepare] ❌ Failed to delete predictions')
-        console.error('[test/prepare]   Error:', delPredErr.message)
-      } else {
-        console.log('[test/prepare] ✅ Old predictions deleted')
-      }
+      console.log('[test/prepare]   Target task:', task_id)
 
-      const { error: delAnalysisErr } = await adminSupabase
+      const { error: delSubErr, count: subCount } = await adminSupabase
+        .from('signal_submissions')
+        .delete({ count: 'exact' })
+        .eq('task_id', task_id)
+      if (delSubErr) {
+        console.error('[test/prepare] ❌ Failed to delete signal submissions:', delSubErr.message)
+        return NextResponse.json(
+          { error: `清除 signal_submissions 失败: ${delSubErr.message}` },
+          { status: 500 },
+        )
+      }
+      deletedSignals = subCount ?? 0
+      console.log(`[test/prepare] ✅ signal_submissions deleted: ${deletedSignals} rows`)
+
+      const { error: delAnalysisErr, count: analysisCount } = await adminSupabase
         .from('causal_analyses')
-        .delete()
+        .delete({ count: 'exact' })
         .eq('task_id', task_id)
       if (delAnalysisErr) {
-        console.error('[test/prepare] ❌ Failed to delete analyses')
-        console.error('[test/prepare]   Error:', delAnalysisErr.message)
-      } else {
-        console.log('[test/prepare] ✅ Old analyses deleted')
+        console.error('[test/prepare] ❌ Failed to delete analyses:', delAnalysisErr.message)
+        return NextResponse.json(
+          { error: `清除 causal_analyses 失败: ${delAnalysisErr.message}` },
+          { status: 500 },
+        )
       }
+      deletedAnalyses = analysisCount ?? 0
+      console.log(`[test/prepare] ✅ causal_analyses deleted: ${deletedAnalyses} rows`)
 
       // ══════════════════════════════════════════════════════════════
-      // Step 3: 重置 market 状态
+      // Step 3: 重置 task 状态
       // ══════════════════════════════════════════════════════════════
-      // 说明：重置 market 的分析状态为初始状态
-      // 表：markets
-      // 条件：id = 指定的 market ID
       const { error: updateErr } = await adminSupabase
-        .from('markets')
+        .from('prediction_tasks')
         .update({ causal_analysis_status: 'none', last_analysis_at: null })
         .eq('id', task_id)
       if (updateErr) {
-        console.error('[test/prepare] ❌ Failed to reset market status')
-        console.error('[test/prepare]   Error:', updateErr.message)
-      } else {
-        console.log('[test/prepare] ✅ Market status reset to "none"')
+        console.error('[test/prepare] ❌ Failed to reset task status:', updateErr.message)
+        return NextResponse.json(
+          { error: `重置任务状态失败: ${updateErr.message}` },
+          { status: 500 },
+        )
       }
+      console.log('[test/prepare] ✅ Task status reset to "none"')
     } else {
       console.log('[test/prepare] ⏭ Skipping data cleanup (no task_id provided)')
     }
@@ -311,6 +318,8 @@ export async function POST(request: NextRequest) {
         success: true,
         agents: existing.map(a => ({ id: a.id, username: a.username, api_key_hash: a.api_key_hash })),
         reused: true,
+        deletedSignals,
+        deletedAnalyses,
         message: `Reusing ${existing.length} existing sim agents`,
       })
     }
@@ -373,8 +382,8 @@ export async function POST(request: NextRequest) {
           reputation_score: 100 + Math.floor(Math.random() * 400),
           reputation_level: ['apprentice', 'journeyman', 'expert'][Math.floor(Math.random() * 3)],
           status: 'active',
-          total_predictions: 0,
-          daily_prediction_count: 0,
+          total_submissions: 0,
+          daily_submission_count: 0,
           niche_tags: [template.expertise, template.occupation],
           persona_region: template.region ?? null,
           persona_gender: template.gender ?? null,
@@ -398,6 +407,8 @@ export async function POST(request: NextRequest) {
       success: true,
       agents: newAgents,
       created: needed,
+      deletedSignals,
+      deletedAnalyses,
       message: `Prepared ${newAgents.length} sim agents`,
     })
   } catch (error) {

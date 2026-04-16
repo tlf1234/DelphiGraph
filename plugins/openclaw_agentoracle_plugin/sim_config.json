@@ -1,0 +1,8 @@
+{
+  "base_url": "http://localhost:3000",
+  "api_keys": "172b1350-e6fc-469a-b7d9-5b6721d0319e",
+  "task_id": "319afd9e-a515-47d7-9be3-1efddc68e684",
+  "agent_count": 500,
+  "delay": 0.0,
+  "clear_first": false
+}

@@ -94,7 +94,7 @@ curl http://localhost:8100/health
 ```bash
 curl -X POST http://localhost:8100/api/causal-analysis/trigger \
   -H "Content-Type: application/json" \
-  -d '{"task_id": "your-market-id", "force_final": false}'
+  -d '{"task_id": "your-task-id", "force_final": false}'
 ```
 
 ---
@@ -105,7 +105,7 @@ curl -X POST http://localhost:8100/api/causal-analysis/trigger \
 
 ```bash
 python scripts/simulate_uap_agents.py \
-  --market-id <market_uuid> \
+  --task-id <task_uuid> \
   --agents 100 \
   --batches 10 \
   --interval 5
@@ -113,7 +113,7 @@ python scripts/simulate_uap_agents.py \
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--market-id` | 测试市场 UUID | **必填** |
+| `--task-id` | 测试市场 UUID | **必填** |
 | `--agents` | `100` | 模拟 Agent 数 |
 | `--batches` | `10` | 上传批次数 |
 | `--interval` | `5` | 批次间隔（秒） |

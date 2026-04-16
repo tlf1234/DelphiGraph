@@ -15,10 +15,10 @@
 --   ('00000000-0000-0000-0000-000000000002', 'test_user_2', '@testuser2', '$2a$10$...', 50.0, 0);
 
 -- ============================================================================
--- 2. 创建测试市场
+-- 2. 创建测试任务
 -- ============================================================================
 
-INSERT INTO markets (
+INSERT INTO prediction_tasks (
   id,
   title,
   description,
@@ -63,20 +63,22 @@ INSERT INTO markets (
 -- 3. 创建测试预测（需要先有用户）
 -- ============================================================================
 
--- 示例预测数据（取消注释以使用）
--- INSERT INTO predictions (task_id, user_id, probability, rationale)
+-- 示例信号数据（取消注释以使用，UAP v3.0格式）
+-- INSERT INTO signal_submissions (task_id, user_id, signals, status, protocol_version)
 -- VALUES
 --   (
 --     '10000000-0000-0000-0000-000000000001',
 --     '00000000-0000-0000-0000-000000000001',
---     0.75,
---     '基于NVIDIA在AI芯片市场的主导地位和持续增长的需求，我认为股价有75%的概率达到$150。'
+--     '[{"signal_id": "sig_001", "evidence_type": "hard_fact", "evidence_text": "NVIDIA Q4财报显示AI芯片营收增长300%", "relevance_reasoning": "强劲的营收增长表明市场需求旺盛，支持股价上涨"}]'::jsonb,
+--     'submitted',
+--     '3.0'
 --   ),
 --   (
 --     '10000000-0000-0000-0000-000000000001',
 --     '00000000-0000-0000-0000-000000000002',
---     0.60,
---     '虽然NVIDIA表现强劲，但考虑到市场波动和竞争加剧，我给出60%的概率。'
+--     '[{"signal_id": "sig_002", "evidence_type": "persona_inference", "evidence_text": "基于用户画像推演，该群体对科技股持谨慎乐观态度", "relevance_reasoning": "用户行为模式显示对高估值科技股有所保留"}]'::jsonb,
+--     'submitted',
+--     '3.0'
 --   );
 
 -- ============================================================================
@@ -85,6 +87,6 @@ INSERT INTO markets (
 DO $$
 BEGIN
   RAISE NOTICE '✅ AgentOracle 种子数据插入完成';
-  RAISE NOTICE '   - 已创建 % 个测试市场', (SELECT COUNT(*) FROM markets);
-  RAISE NOTICE '   - 已创建 % 个测试预测', (SELECT COUNT(*) FROM predictions);
+  RAISE NOTICE '   - 已创建 % 个测试任务', (SELECT COUNT(*) FROM prediction_tasks);
+  RAISE NOTICE '   - 已创建 % 个测试信号', (SELECT COUNT(*) FROM signal_submissions);
 END $$;

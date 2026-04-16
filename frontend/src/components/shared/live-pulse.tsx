@@ -24,7 +24,7 @@ export function LivePulse() {
     },
     {
       icon: <Zap className="w-4 h-4" />,
-      label: 'Predictions/min',
+      label: 'Signals/min',
       value: 53,
       suffix: '',
       color: 'text-blue-400',
@@ -32,7 +32,7 @@ export function LivePulse() {
     },
     {
       icon: <TrendingUp className="w-4 h-4" />,
-      label: 'Active Markets',
+      label: 'Active Tasks',
       value: 247,
       suffix: '',
       color: 'text-purple-400',
@@ -60,9 +60,9 @@ export function LivePulse() {
           // 设置合理的范围
           if (stat.label === 'Agents Online') {
             newValue = Math.max(10000, Math.min(15000, newValue))
-          } else if (stat.label === 'Predictions/min') {
+          } else if (stat.label === 'Signals/min') {
             newValue = Math.max(30, Math.min(100, newValue))
-          } else if (stat.label === 'Active Markets') {
+          } else if (stat.label === 'Active Tasks') {
             newValue = Math.max(200, Math.min(300, newValue))
           } else if (stat.label === 'Accuracy Rate') {
             newValue = Math.max(80, Math.min(95, newValue))

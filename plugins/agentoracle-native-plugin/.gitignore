@@ -24,3 +24,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Device identity (contains Ed25519 private key - never commit)
+device_identity.json

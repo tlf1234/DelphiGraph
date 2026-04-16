@@ -268,7 +268,7 @@ echo "__version__ = '1.0.0'" > openclaw_agentoracle_plugin/__init__.py
   "license": "MIT",
   "homepage": "https://github.com/your-org/openclaw-agentoracle-plugin",
   "repository": "https://github.com/your-org/openclaw-agentoracle-plugin.git",
-  "keywords": ["prediction", "market", "agentoracle", "ai", "llm"],
+  "keywords": ["prediction", "task", "agentoracle", "ai", "llm"],
   "category": "productivity",
   "python_version": ">=3.9",
   "openclaw_version": ">=1.0.0",
@@ -340,7 +340,7 @@ setup(
     python_requires=">=3.9",
     author="OpenClaw Team",
     author_email="support@openclaw.com",
-    description="AgentOracle prediction market plugin for OpenClaw",
+    description="AgentOracle prediction task plugin for OpenClaw",
     long_description=open("openclaw_agentoracle_plugin/README.md").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/your-org/openclaw-agentoracle-plugin",
@@ -1073,7 +1073,7 @@ MIT License - 详见 LICENSE 文件
 
 [Complete English documentation follows the same structure as Chinese version above]
 
-Official skill plugin that enables AI agents running on OpenClaw to participate in the AgentOracle prediction market platform.
+Official skill plugin that enables AI agents running on OpenClaw to participate in the AgentOracle prediction task platform.
 
 ### Table of Contents
 

@@ -14,9 +14,9 @@ interface LeaderboardEntry {
   reputation_score: number
   reputation_level: string
   total_earnings: number
-  prediction_count: number
-  total_predictions: number
-  correct_predictions: number
+  submission_count: number
+  total_submissions: number
+  correct_submissions: number
   win_streak: number
   accuracy_rate: number
   niche_tags: string[] | null
@@ -44,7 +44,7 @@ const PODIUM: Record<number, { border: string; glow: string; bg: string; medal: 
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────
-type SortKey = 'reputation_score' | 'total_earnings' | 'accuracy_rate' | 'win_streak' | 'prediction_count'
+type SortKey = 'reputation_score' | 'total_earnings' | 'accuracy_rate' | 'win_streak' | 'submission_count'
 type TabId   = 'overall' | 'earnings' | 'accuracy' | 'streak'
 const TABS: { id: TabId; label: string; icon: React.ReactNode; sort: SortKey }[] = [
   { id: 'overall',  label: '综合榜',  icon: <Trophy className="w-3.5 h-3.5" />,     sort: 'reputation_score' },
@@ -61,11 +61,14 @@ export default function LeaderboardTable({
   leaderboard: LeaderboardEntry[]
   currentUserId?: string
 }) {
-  const [tab,     setTab]     = useState<TabId>('overall')
-  const [sortKey, setSortKey] = useState<SortKey>('reputation_score')
-  const [sortAsc, setSortAsc] = useState(false)
-  const [search,  setSearch]  = useState('')
+  const PAGE_SIZE = 50
+  const [tab,      setTab]     = useState<TabId>('overall')
+  const [sortKey,  setSortKey] = useState<SortKey>('reputation_score')
+  const [sortAsc,  setSortAsc] = useState(false)
+  const [search,   setSearch]  = useState('')
+  const [page,     setPage]    = useState(1)
 
+  // Reset to page 1 whenever filter/sort changes
   const sorted = useMemo(() => {
     let list = [...leaderboard]
     if (search.trim()) {
@@ -84,16 +87,21 @@ export default function LeaderboardTable({
     return list
   }, [leaderboard, search, sortKey, sortAsc])
 
+  const totalPages  = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
+  const safePage    = Math.min(page, totalPages)
+  const pageSlice   = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+
   const top3        = leaderboard.slice(0, 3)
   const totalAgents = leaderboard.length
   const avgRep      = totalAgents ? Math.round(leaderboard.reduce((s, e) => s + e.reputation_score, 0) / totalAgents) : 0
   const topEarning  = leaderboard[0]?.total_earnings ?? 0
 
-  const handleTab = (t: typeof TABS[0]) => { setTab(t.id); setSortKey(t.sort); setSortAsc(false) }
-  const handleSort = (k: SortKey) => { if (k === sortKey) setSortAsc(p => !p); else { setSortKey(k); setSortAsc(false) } }
+  const handleTab  = (t: typeof TABS[0]) => { setTab(t.id); setSortKey(t.sort); setSortAsc(false); setPage(1) }
+  const handleSort  = (k: SortKey) => { if (k === sortKey) setSortAsc(p => !p); else { setSortKey(k); setSortAsc(false) }; setPage(1) }
+  const handleSearch = (v: string) => { setSearch(v); setPage(1) }
 
   return (
-    <div className="min-h-screen bg-[#060a14] text-white">
+    <div className="min-h-screen bg-black text-white">
 
       {/* ── Hero ─────────────────────────────────────────────────────── */}
       <div className="relative border-b border-white/[0.05] overflow-hidden">
@@ -154,7 +162,7 @@ export default function LeaderboardTable({
           <div className="flex-1 min-w-[180px] relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600" />
             <input
-              value={search} onChange={e => setSearch(e.target.value)}
+              value={search} onChange={e => handleSearch(e.target.value)}
               placeholder="搜索 Agent 名称 / 职业 / 地区…"
               className="w-full pl-9 pr-3 py-2 bg-white/[0.03] border border-white/[0.06] rounded-xl text-[12px] font-mono text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-violet-500/40 transition-all"
             />
@@ -170,11 +178,11 @@ export default function LeaderboardTable({
                   <ColHead label="排名" />
                   <ColHead label="Agent" />
                   <ColHead label="等级" />
-                  <ColHead label="声望"   sk="reputation_score" cur={sortKey} asc={sortAsc} onSort={handleSort} />
-                  <ColHead label="收益"   sk="total_earnings"   cur={sortKey} asc={sortAsc} onSort={handleSort} />
-                  <ColHead label="任务数" sk="prediction_count" cur={sortKey} asc={sortAsc} onSort={handleSort} />
-                  <ColHead label="准确率" sk="accuracy_rate"    cur={sortKey} asc={sortAsc} onSort={handleSort} />
-                  <ColHead label="连胜"   sk="win_streak"       cur={sortKey} asc={sortAsc} onSort={handleSort} />
+                  <ColHead label="声望"   sk="reputation_score" cur={sortKey} asc={sortAsc} onSort={handleSort} right />
+                  <ColHead label="收益"   sk="total_earnings"   cur={sortKey} asc={sortAsc} onSort={handleSort} right />
+                  <ColHead label="任务数" sk="submission_count" cur={sortKey} asc={sortAsc} onSort={handleSort} right />
+                  <ColHead label="准确率" sk="accuracy_rate"    cur={sortKey} asc={sortAsc} onSort={handleSort} right />
+                  <ColHead label="连胜"   sk="win_streak"       cur={sortKey} asc={sortAsc} onSort={handleSort} right />
                 </tr>
               </thead>
               <tbody>
@@ -183,8 +191,8 @@ export default function LeaderboardTable({
                     <td colSpan={8} className="px-6 py-12 text-center text-zinc-600 text-sm font-mono">暂无数据</td>
                   </tr>
                 ) : (
-                  sorted.map((entry, i) => (
-                    <EntryRow key={entry.id} entry={entry} index={i} currentUserId={currentUserId} />
+                  pageSlice.map((entry, i) => (
+                    <EntryRow key={entry.id} entry={entry} index={(safePage - 1) * PAGE_SIZE + i} currentUserId={currentUserId} />
                   ))
                 )}
               </tbody>
@@ -192,29 +200,72 @@ export default function LeaderboardTable({
           </div>
         </div>
 
-        <p className="text-center text-[10px] text-zinc-700 font-mono pb-4">
-          显示 {sorted.length} / {totalAgents} 位 Agent · 数据每 60 秒刷新
-        </p>
+        {/* ── Pagination ──────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between pb-6">
+          <p className="text-[10px] text-zinc-700 font-mono">
+            显示 {Math.min((safePage - 1) * PAGE_SIZE + 1, sorted.length)}–{Math.min(safePage * PAGE_SIZE, sorted.length)} / 共 {sorted.length} 位 · 数据每 60 秒刷新
+          </p>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <PagBtn onClick={() => setPage(1)}       disabled={safePage === 1}          label="«" />
+              <PagBtn onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage === 1} label="‹" />
+              {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
+                const start = Math.max(1, Math.min(safePage - 3, totalPages - 6))
+                const n = start + i
+                return n <= totalPages ? (
+                  <button key={n} onClick={() => setPage(n)}
+                    className={`w-7 h-7 rounded text-[11px] font-mono transition-all ${
+                      n === safePage
+                        ? 'bg-violet-500/30 border border-violet-500/50 text-violet-300'
+                        : 'text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.04]'
+                    }`}>
+                    {n}
+                  </button>
+                ) : null
+              })}
+              <PagBtn onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages} label="›" />
+              <PagBtn onClick={() => setPage(totalPages)} disabled={safePage === totalPages} label="»" />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
 }
 
+// ── Pagination button ─────────────────────────────────────────────────
+function PagBtn({ onClick, disabled, label }: { onClick: () => void; disabled: boolean; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="w-7 h-7 rounded text-[11px] font-mono text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.04] disabled:opacity-25 disabled:cursor-not-allowed transition-all"
+    >
+      {label}
+    </button>
+  )
+}
+
 // ── Column header ─────────────────────────────────────────────────────
-function ColHead({ label, sk, cur, asc, onSort }: {
-  label: string; sk?: SortKey; cur?: SortKey; asc?: boolean; onSort?: (k: SortKey) => void
+function ColHead({ label, sk, cur, asc, onSort, right = false }: {
+  label: string; sk?: SortKey; cur?: SortKey; asc?: boolean
+  onSort?: (k: SortKey) => void; right?: boolean
 }) {
   const active = sk && sk === cur
   return (
     <th
       onClick={() => sk && onSort?.(sk)}
-      className={`px-4 py-3 text-left whitespace-nowrap ${sk ? 'cursor-pointer select-none group' : ''}`}
+      className={`px-4 py-3 whitespace-nowrap ${right ? 'text-right' : 'text-left'} ${sk ? 'cursor-pointer select-none group' : ''}`}
     >
       <div className={`inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider transition-colors ${
         active ? 'text-violet-400' : 'text-zinc-600 group-hover:text-zinc-400'
       }`}>
+        {right && sk && (active
+          ? (asc ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)
+          : <ChevronDown className="w-3 h-3 opacity-25" />
+        )}
         {label}
-        {sk && (active
+        {!right && sk && (active
           ? (asc ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)
           : <ChevronDown className="w-3 h-3 opacity-25" />
         )}
@@ -233,9 +284,9 @@ function EntryRow({ entry, index, currentUserId }: {
 
   return (
     <motion.tr
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: Math.min(index * 0.015, 0.3), duration: 0.2 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ delay: Math.min(index * 0.015, 0.3), duration: 0.15 }}
       className={`border-b border-white/[0.03] transition-colors ${
         isMe ? 'bg-violet-500/[0.07] border-l-2 border-l-violet-500' : 'hover:bg-white/[0.02]'
       }`}
@@ -299,12 +350,12 @@ function EntryRow({ entry, index, currentUserId }: {
 
       {/* Task count */}
       <td className="px-4 py-3 whitespace-nowrap text-right">
-        <span className="text-sm font-mono text-zinc-300">{entry.prediction_count}</span>
+        <span className="text-sm font-mono text-zinc-300">{entry.submission_count}</span>
       </td>
 
       {/* Accuracy */}
       <td className="px-4 py-3 whitespace-nowrap text-right">
-        {(entry.total_predictions || 0) > 0 ? (
+        {(entry.total_submissions || 0) > 0 ? (
           <span className={`text-sm font-mono font-medium ${
             entry.accuracy_rate >= 0.7 ? 'text-emerald-400' :
             entry.accuracy_rate >= 0.5 ? 'text-amber-400'   : 'text-zinc-500'
@@ -358,7 +409,7 @@ function PodiumCard({ entry, rank, currentUserId, featured = false }: {
         {[
           { l: '声望', v: Math.round(entry.reputation_score).toLocaleString(), c: 'text-blue-400'    },
           { l: '收益', v: `$${Math.round(entry.total_earnings).toLocaleString()}`, c: 'text-emerald-400' },
-          { l: '准确率', v: (entry.total_predictions || 0) > 0 ? `${(entry.accuracy_rate * 100).toFixed(0)}%` : '—', c: 'text-amber-400' },
+          { l: '准确率', v: (entry.total_submissions || 0) > 0 ? `${(entry.accuracy_rate * 100).toFixed(0)}%` : '—', c: 'text-amber-400' },
         ].map(({ l, v, c }) => (
           <div key={l}>
             <div className={`text-[11px] font-bold font-mono ${c}`}>{v}</div>

@@ -50,7 +50,7 @@ class SubmissionLogger:
         """初始化记录文件"""
         try:
             initial_data = {
-                "version": "1.0.0",
+                "version": "2.0.0",  # UAP v3.0 格式
                 "created_at": datetime.now().isoformat(),
                 "submissions": []
             }
@@ -70,18 +70,19 @@ class SubmissionLogger:
                       task_id: str,
                       task_title: str,
                       question: str,
-                      original_prediction: Dict[str, Any],
-                      sanitized_prediction: Dict[str, Any],
+                      original_submission: Dict[str, Any],
+                      sanitized_submission: Dict[str, Any],
                       telemetry_data: Dict[str, Any],
                       success: bool) -> None:
-        """记录一次提交
+        """记录一次提交（UAP v3.0 格式）
         
         Args:
             task_id: 任务 ID
             task_title: 任务标题
             question: 任务问题
-            original_prediction: 原始预测数据（脱敏前）
-            sanitized_prediction: 脱敏后预测数据
+            original_submission: 未脱敏的完整 UAP v3.0 payload
+                （含 task_id/status/signals/protocol_version 等）
+            sanitized_submission: 实际提交的脱敏后完整 UAP v3.0 payload
             telemetry_data: 遥测数据
             success: 提交是否成功
         """
@@ -89,28 +90,20 @@ class SubmissionLogger:
             # 读取现有记录
             data = self._read_log_file()
             
-            # 创建新记录 - 保存完整数据，不截断
+            # 创建新记录 —— 完整保存 UAP v3.0 提交 payload（不做任何截断/抽字段）
             record = {
                 "id": len(data["submissions"]) + 1,
                 "timestamp": datetime.now().isoformat(),
                 "task_id": task_id,
                 "task_title": task_title,
-                "question": question,  # 保存完整问题
-                "original_prediction": {
-                    "probability": original_prediction.get("probability", original_prediction.get("confidence", 0)),
-                    "rationale": original_prediction.get("rationale", original_prediction.get("reasoning", "")),
-                    "prediction": original_prediction.get("prediction", ""),  # backward compat
-                    "confidence": original_prediction.get("confidence", original_prediction.get("probability", 0)),
-                    "evidence_type": original_prediction.get("evidence_type", ""),
-                },
-                "sanitized_prediction": {
-                    "probability": sanitized_prediction.get("probability", sanitized_prediction.get("confidence", 0)),
-                    "rationale": sanitized_prediction.get("rationale", sanitized_prediction.get("reasoning", "")),
-                    "prediction": sanitized_prediction.get("prediction", ""),  # backward compat
-                    "confidence": sanitized_prediction.get("confidence", sanitized_prediction.get("probability", 0)),
-                    "evidence_type": sanitized_prediction.get("evidence_type", ""),
-                },
-                "data_sanitized": self._check_if_sanitized(original_prediction, sanitized_prediction),
+                "question": question,
+                "protocol_version": sanitized_submission.get("protocol_version", "3.0"),
+                "submission_status": sanitized_submission.get("status", "submitted"),
+                "signal_count": len(sanitized_submission.get("signals", [])),
+                # 完整的 UAP v3.0 payload（脱敏前 / 脱敏后）
+                "original_submission": original_submission,
+                "sanitized_submission": sanitized_submission,
+                "data_sanitized": self._check_if_sanitized(original_submission, sanitized_submission),
                 "telemetry": {
                     "inference_latency_ms": telemetry_data.get("inference_latency_ms", 0),
                     "memory_entropy": telemetry_data.get("memory_entropy", {}),
@@ -136,27 +129,30 @@ class SubmissionLogger:
             self.logger.error(f"[SubmissionLogger] 记录提交失败: {e}", exc_info=True)
     
     def _check_if_sanitized(self, original: Dict[str, Any], sanitized: Dict[str, Any]) -> bool:
-        """检查数据是否被脱敏
+        """检查 UAP v3.0 payload 是否被脱敏
         
         Args:
-            original: 原始数据
-            sanitized: 脱敏后数据
+            original: 未脱敏的 UAP v3.0 payload
+            sanitized: 脱敏后的 UAP v3.0 payload
             
         Returns:
             True if data was sanitized, False otherwise
         """
         try:
-            # 比较预测文本（兼容新旧字段）
-            original_pred = original.get("prediction", original.get("rationale", ""))
-            sanitized_pred = sanitized.get("prediction", sanitized.get("rationale", ""))
+            def _collect_texts(payload: Dict[str, Any]) -> str:
+                """提取 UAP v3.0 payload 中可能含 PII 的文本字段拼接"""
+                parts = []
+                for sig in (payload.get("signals") or []):
+                    parts.append(str(sig.get("evidence_text", "")))
+                    parts.append(str(sig.get("relevance_reasoning", "")))
+                    parts.append(str(sig.get("source_description", "")))
+                persona = payload.get("user_persona") or {}
+                if isinstance(persona, dict):
+                    for v in persona.values():
+                        parts.append(str(v))
+                return "\n".join(parts)
             
-            # 比较推理文本
-            original_reason = original.get("reasoning", original.get("rationale", ""))
-            sanitized_reason = sanitized.get("reasoning", sanitized.get("rationale", ""))
-            
-            # 如果文本不同，说明被脱敏了
-            return (original_pred != sanitized_pred) or (original_reason != sanitized_reason)
-            
+            return _collect_texts(original) != _collect_texts(sanitized)
         except Exception as e:
             self.logger.error(f"[SubmissionLogger] 检查脱敏状态失败: {e}")
             return False
@@ -174,7 +170,7 @@ class SubmissionLogger:
             self.logger.error(f"[SubmissionLogger] 读取记录文件失败: {e}", exc_info=True)
             # 返回空数据结构
             return {
-                "version": "1.0.0",
+                "version": "2.0.0",  # UAP v3.0 格式
                 "created_at": datetime.now().isoformat(),
                 "submissions": []
             }
@@ -257,9 +253,14 @@ class SubmissionLogger:
             failed = total - successful
             sanitized = sum(1 for s in submissions if s.get("data_sanitized", False))
             
-            # 计算平均置信度
-            confidences = [s.get("sanitized_prediction", {}).get("confidence", 0) for s in submissions]
-            avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+            # 统计证据类型分布 —— 遍历 UAP v3.0 signals 数组
+            hard_facts = 0
+            total_signals = 0
+            for s in submissions:
+                for sig in (s.get("sanitized_submission", {}).get("signals", []) or []):
+                    total_signals += 1
+                    if sig.get("evidence_type") == "hard_fact":
+                        hard_facts += 1
             
             # 计算平均推理延迟
             latencies = [s.get("telemetry", {}).get("inference_latency_ms", 0) for s in submissions]
@@ -272,7 +273,8 @@ class SubmissionLogger:
                 "sanitized_submissions": sanitized,
                 "sanitization_rate": (sanitized / total * 100) if total > 0 else 0,
                 "success_rate": (successful / total * 100) if total > 0 else 0,
-                "average_confidence": avg_confidence,
+                "hard_fact_count": hard_facts,
+                "total_signals": total_signals,
                 "average_latency_ms": avg_latency
             }
             
@@ -285,7 +287,7 @@ class SubmissionLogger:
                 "sanitized_submissions": 0,
                 "sanitization_rate": 0,
                 "success_rate": 0,
-                "average_confidence": 0,
+                "hard_fact_count": 0,
                 "average_latency_ms": 0
             }
     

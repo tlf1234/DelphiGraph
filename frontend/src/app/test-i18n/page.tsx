@@ -100,8 +100,8 @@ export default function TestI18nPage() {
                 <div className="font-mono text-sm">{t.dashboard.reputationScore}</div>
               </div>
               <div className="bg-zinc-800/50 p-4 rounded">
-                <div className="text-xs text-zinc-500 mb-1">predictions</div>
-                <div className="font-mono text-sm">{t.dashboard.predictions}</div>
+                <div className="text-xs text-zinc-500 mb-1">submissions</div>
+                <div className="font-mono text-sm">{t.dashboard.submissions}</div>
               </div>
               <div className="bg-zinc-800/50 p-4 rounded">
                 <div className="text-xs text-zinc-500 mb-1">totalEarnings</div>

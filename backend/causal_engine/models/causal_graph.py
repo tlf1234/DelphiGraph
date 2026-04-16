@@ -2,7 +2,7 @@
 因果逻辑图数据模型
 
 定义因果图的节点（因子）、边（因果关系）和完整图结构。
-预测结论（direction/confidence）由平台宏观大脑的推演引擎生成。
+分析结论（direction/confidence）由平台宏观大脑的推演引擎生成。
 """
 
 import uuid
@@ -27,12 +27,12 @@ class ClusterNode:
     
     # 质量评分
     avg_quality_score: float = 0.0        # 簇内信号平均质量
-    relevance_score: float = 0.0          # 与预测问题的相关度
+    relevance_score: float = 0.0          # 与分析问题的相关度
     
     # 特殊标记
     is_minority: bool = False             # 是否为少数派聚类
     
-    # 人群画像分布（UAP v2.0）
+    # 人群画像分布
     persona_distribution: Dict = field(default_factory=dict)
     
     # 溯源
@@ -75,13 +75,13 @@ class CausalNode:
 
     # 评分
     confidence: float = 0.0               # 因子置信度（证据质量加权）
-    impact_score: float = 0.0             # 对预测目标的影响强度
+    impact_score: float = 0.0             # 对分析目标的影响强度
 
     # 方向（由平台基于入边加权投票计算）
     evidence_direction: str = "neutral"   # bullish / bearish / neutral
 
     # 特殊标记
-    is_prediction_target: bool = False
+    is_analysis_target: bool = False
     is_minority_driven: bool = False
 
     # 溯源：来源聚类
@@ -106,7 +106,7 @@ class CausalNode:
             "confidence": round(self.confidence, 4),
             "impact_score": round(self.impact_score, 4),
             "evidence_direction": self.evidence_direction,
-            "is_target": self.is_prediction_target,
+            "is_target": self.is_analysis_target,
             "is_minority": self.is_minority_driven,
             "source_cluster_ids": self.source_cluster_ids,
             "evidence_ids": self.evidence_ids,
@@ -181,7 +181,7 @@ class CausalGraph:
     """完整的5层因果逻辑图"""
     graph_id: str = ""
     task_id: str = ""
-    market_query: str = ""
+    task_query: str = ""
 
     # Layer 3: 聚类层（5-15个主题聚类）
     cluster_nodes: List[ClusterNode] = field(default_factory=list)
@@ -195,10 +195,10 @@ class CausalGraph:
     # 边：因子间因果关系
     edges: List[CausalEdge] = field(default_factory=list)
 
-    # 预测结论（由推演引擎生成）
-    prediction_target_node_id: str = ""
-    prediction_direction: str = ""        # bullish / bearish / neutral
-    prediction_confidence: float = 0.0
+    # 分析结论（由推演引擎生成）
+    analysis_target_node_id: str = ""
+    analysis_direction: str = ""        # bullish / bearish / neutral
+    analysis_confidence: float = 0.0
     confidence_interval: Dict = field(default_factory=dict)
 
     # 分析结果
@@ -228,7 +228,7 @@ class CausalGraph:
         return next((n for n in self.nodes if n.node_id == node_id), None)
 
     def get_target_node(self) -> Optional[CausalNode]:
-        return next((n for n in self.nodes if n.is_prediction_target), None)
+        return next((n for n in self.nodes if n.is_analysis_target), None)
 
     def to_dict(self) -> Dict:
         """序列化为前端可用的 JSON - 5层图谱结构"""
@@ -238,7 +238,7 @@ class CausalGraph:
         return {
             "graph_id": self.graph_id,
             "task_id": self.task_id,
-            "market_query": self.market_query,
+            "task_query": self.task_query,
             
             # Layer 3: 聚类节点
             "cluster_nodes": [c.to_dict() for c in self.cluster_nodes],
@@ -262,10 +262,10 @@ class CausalGraph:
                 for e in self.edges
             ],
             
-            "prediction": {
-                "target_node_id": self.prediction_target_node_id,
-                "direction": self.prediction_direction,
-                "confidence": round(self.prediction_confidence, 4),
+            "analysis": {
+                "target_node_id": self.analysis_target_node_id,
+                "direction": self.analysis_direction,
+                "confidence": round(self.analysis_confidence, 4),
                 "confidence_interval": self.confidence_interval,
             },
             "critical_paths": self.critical_paths,

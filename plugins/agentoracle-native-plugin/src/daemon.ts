@@ -3,15 +3,23 @@ import { WebSocketClient } from './websocket_client';
 import { Sanitizer } from './sanitizer';
 import { AuditLogger } from './audit_logger';
 import { PromptBuilder } from './prompt_builder';
-import { PredictionParser } from './prediction_parser';
+import { SignalParser } from './signal_parser';
 import {
   DaemonConfig,
-  PredictionSubmission,
+  Task,
+  Signal,
+  SignalSubmission,
+  ParsedSignalResponse,
   PluginLogger,
   NetworkError,
   AuthenticationError,
   RateLimitError
 } from './types';
+import packageJson from '../package.json';
+
+// UAP v3.0 运维字段（协议 §4.4）
+const PLUGIN_VERSION = `${packageJson.name}/${packageJson.version}`;
+const MODEL_NAME = 'openclaw-gateway';
 
 /**
  * Daemon 类
@@ -23,6 +31,7 @@ export class Daemon {
   private isPaused: boolean = false;
   private hasRunVerification: boolean = false;
   private onVerificationSuccess?: () => void;
+  private processingTaskIds: Set<string> = new Set();
 
   constructor(
     private config: DaemonConfig,
@@ -124,9 +133,10 @@ export class Daemon {
 
     this.logger.info('[agentoracle-native-plugin] Starting polling cycle');
 
+    let task: Task | null = null;
     try {
       // 1. 获取任务
-      const task = await this.apiClient.fetchTask();
+      task = await this.apiClient.fetchTask();
 
       if (!task) {
         this.logger.info('[agentoracle-native-plugin] No available tasks');
@@ -135,12 +145,20 @@ export class Daemon {
 
       this.logger.info(`[agentoracle-native-plugin] Fetched task: ${task.id}`);
 
-      // 2. WebSocket 推理
+      // 防止同一任务并发处理（多实例或快速重试）
+      if (this.processingTaskIds.has(task.id)) {
+        this.logger.warn(`[agentoracle-native-plugin] Task ${task.id} is already being processed, skipping`);
+        return;
+      }
+      this.processingTaskIds.add(task.id);
+
+      // 2. 构建 v3.0 数据因子构造 Prompt 并发送到 OpenClaw
       const prompt = this.buildPrompt(task);
       const llmResult = await this.wsClient.sendMessage(prompt);
 
       if (!llmResult) {
         this.logger.error(`[agentoracle-native-plugin] WebSocket reasoning failed for task: ${task.id}`);
+        this.processingTaskIds.delete(task.id);
         return;
       }
 
@@ -151,9 +169,8 @@ export class Daemon {
       this.logger.info('[agentoracle-native-plugin] ━━━━━━━━━━━━━━━━━━━━━━');
       this.logger.info('[agentoracle-native-plugin] ========================================');
 
-      // 3. 脱敏处理
+      // 3. 脱敏处理（对原始响应整体脱敏）
       const sanitizationResult = this.sanitizer.sanitize(llmResult);
-
       this.logger.info(`[agentoracle-native-plugin] Sanitization completed for task: ${task.id}`);
 
       // 4. 审计日志（脱敏前后对比）
@@ -163,62 +180,212 @@ export class Daemon {
         original: sanitizationResult.original,
         sanitized: sanitizationResult.sanitized
       });
-
       this.logger.info(`[agentoracle-native-plugin] Audit log written for task: ${task.id}`);
 
-      // 5. 解析 LLM 输出为结构化预测数据
-      const parsed = PredictionParser.parse(sanitizationResult.sanitized);
+      // 5. 解析脱敏后的响应为 v3.0 结构化信号数据
+      let parsed = SignalParser.parse(sanitizationResult.sanitized);
+      this.logger.info(`[agentoracle-native-plugin] Parsed signals: status=${parsed.status}, signals=${parsed.signals.length}`);
 
-      this.logger.info(`[agentoracle-native-plugin] Parsed prediction: probability=${parsed.probability}, evidence_type=${parsed.evidence_type}`);
+      // 5.5 ========== 【TEMP DEBUG】abstained → 二次请求 mock 数据 ==========
+      // 与 Python 插件 skill.py::process_task 的 mock debug 流程对齐。
+      // 正式上线前可移除本段。
+      if (parsed.status === 'abstained') {
+        const mockParsed = await this.handleAbstainMockDebug(task, parsed);
+        if (mockParsed) {
+          parsed = mockParsed;
+        } else {
+          // mock 失败，提交原始 abstained
+          this.logger.info(`[agentoracle-native-plugin] [MOCK-DEBUG] 使用原始 abstained 继续提交`);
+        }
+      }
+      // ========== END TEMP DEBUG ==========
 
-      // 6. 构建提交数据（与 /api/agent/predictions 平台路由的 PredictionRequest 接口对齐）
-      const submissionData: PredictionSubmission = {
-        taskId: task.id,
-        probability: parsed.probability,
-        rationale: parsed.rationale,
-        evidence_type: parsed.evidence_type,
-        evidence_text: parsed.evidence_text || undefined,
-        relevance_score: parsed.relevance_score,
-        entity_tags: parsed.entity_tags.length > 0 ? parsed.entity_tags : undefined,
-        source_url: parsed.source_urls.length > 0 ? parsed.source_urls[0] : undefined,
-      };
+      // 6. 对每条 signal 的文本字段再次脱敏
+      const sanitizedSignals: Signal[] = parsed.signals.map(sig => ({
+        ...sig,
+        evidence_text: this.sanitizer.sanitize(sig.evidence_text).sanitized,
+        relevance_reasoning: this.sanitizer.sanitize(sig.relevance_reasoning).sanitized,
+        source_description: sig.source_description
+          ? this.sanitizer.sanitize(sig.source_description).sanitized
+          : undefined,
+      }));
 
-      // 7. 记录提交数据日志（发送到平台的完整数据）
+      // 7. 构建两份 UAP v3.0 payload（原始未脱敏 / 最终脱敏）
+      const originalPayload = this.buildUapPayload(task.id, parsed, parsed.signals);
+      const sanitizedPayload = this.buildUapPayload(task.id, parsed, sanitizedSignals);
+
+      // 调试：打印完整 UAP v3.0 JSON（api_client.submitSignals 里也有一份，这里提前打印便于对齐）
+      this.logger.info('[agentoracle-native-plugin] ========================================');
+      this.logger.info(`[agentoracle-native-plugin] 📤 正在提交信号数据 (task ${task.id}):`);
+      this.logger.info(`[agentoracle-native-plugin]   - status: ${sanitizedPayload.status}`);
+      this.logger.info(`[agentoracle-native-plugin]   - signal_count: ${sanitizedPayload.signals?.length ?? 0}`);
+      this.logger.info(`[agentoracle-native-plugin]   - model_name: ${sanitizedPayload.model_name}`);
+      this.logger.info(`[agentoracle-native-plugin]   - plugin_version: ${sanitizedPayload.plugin_version}`);
+      try {
+        const fullJson = JSON.stringify(sanitizedPayload, null, 2);
+        this.logger.info('[agentoracle-native-plugin] 📦 完整提交 JSON (UAP v3.0):');
+        for (const line of fullJson.split('\n')) {
+          this.logger.info(`[agentoracle-native-plugin] | ${line}`);
+        }
+      } catch (dbgErr) {
+        this.logger.warn(`[agentoracle-native-plugin] 打印完整 payload 失败: ${dbgErr}`);
+      }
+      this.logger.info('[agentoracle-native-plugin] ========================================');
+
+      // 8. 记录提交数据日志（UAP v3.0：原始 + 脱敏双份）
       await this.auditLogger.logSubmission({
         timestamp: this.formatTimestamp(new Date()),
         taskId: task.id,
         taskQuestion: task.question,
         taskContext: task.description,
         aiResponse: llmResult,
-        sanitizedPrediction: sanitizationResult.sanitized,
-        submittedData: { ...submissionData }
+        sanitizedResponse: sanitizationResult.sanitized,
+        originalPayload: { ...originalPayload },
+        sanitizedPayload: { ...sanitizedPayload },
       });
-
       this.logger.info(`[agentoracle-native-plugin] Submission log written for task: ${task.id}`);
 
-      // 8. 提交结果到平台
-      await this.apiClient.submitResult(submissionData);
+      // 9. 提交信号到平台 (v3.0 endpoint)
+      await this.apiClient.submitSignals(sanitizedPayload);
 
-      this.logger.info(`[agentoracle-native-plugin] Result submitted for task: ${task.id}`);
+      this.logger.info(`[agentoracle-native-plugin] Signals submitted for task: ${task.id} (status=${parsed.status}, signals=${sanitizedSignals.length})`);
+      this.processingTaskIds.delete(task.id);
 
     } catch (error) {
+      if (task) this.processingTaskIds.delete(task.id);
       this.handleError(error);
     }
   }
 
   /**
    * 构建 LLM 提示词
-   * 使用 PromptBuilder 构建高质量的预测任务提示词
+   * 使用 PromptBuilder 构建 v3.0 数据因子构造提示词
    * @param task 任务对象
    * @returns 提示词字符串
    */
-  private buildPrompt(task: any): string {
-    return PromptBuilder.buildPredictionPrompt({
+  private buildPrompt(task: Task | { id: string; question: string; description: string; title?: string }): string {
+    return PromptBuilder.buildSensorPrompt({
       task_id: task.id,
       question: task.question,
       context: task.description,
-      background: task.title !== task.question ? task.title : undefined,
+      background: (task as Task).title && (task as Task).title !== task.question ? (task as Task).title : undefined,
     });
+  }
+
+  /**
+   * 构建 UAP v3.0 提交 payload
+   * 与 openclaw_agentoracle_plugin/src/skill.py::_build_uap_payload 对齐
+   *
+   * - 为每条 signal 自动补 signal_id 和 observed_at（若缺失）
+   * - 附上 model_name / plugin_version 运维字段
+   * - 当 status=abstained 时携带 abstain_reason / abstain_detail
+   */
+  private buildUapPayload(
+    taskId: string,
+    parsed: ParsedSignalResponse,
+    signals: Signal[]
+  ): SignalSubmission {
+    const nowIso = new Date().toISOString();
+    const nowSec = Math.floor(Date.now() / 1000);
+    const shortTaskId = taskId.slice(0, 8);
+
+    const builtSignals: Signal[] = signals.map((sig, idx) => ({
+      ...sig,
+      signal_id: sig.signal_id || `sig_${shortTaskId}_${nowSec}_${idx}`,
+      observed_at: sig.observed_at || nowIso,
+    }));
+
+    const payload: SignalSubmission = {
+      task_id: taskId,
+      status: parsed.status,
+      privacy_cleared: true,
+      protocol_version: '3.0',
+      model_name: MODEL_NAME,
+      plugin_version: PLUGIN_VERSION,
+    };
+
+    if (parsed.status === 'submitted') {
+      payload.signals = builtSignals;
+    }
+    if (parsed.user_persona) {
+      payload.user_persona = parsed.user_persona;
+    }
+    // 协议 §4.3：弃权时携带 abstain_reason / abstain_detail
+    if (parsed.status === 'abstained') {
+      if (parsed.abstain_reason) payload.abstain_reason = parsed.abstain_reason;
+      if (parsed.abstain_detail) payload.abstain_detail = parsed.abstain_detail;
+    }
+    return payload;
+  }
+
+  /**
+   * 【TEMP DEBUG】abstained 二次请求 mock 数据
+   * 与 openclaw_agentoracle_plugin/src/skill.py::process_task 中 mock debug 流程对齐
+   *
+   * 当 agent 首轮返回 abstained 时，发起二次请求使用专门的 mock 提示词，
+   * 让 agent 自己根据任务信息合理构造模拟数据。
+   *
+   * 所有 mock 生成的信号会被强制打上 [MOCK-DEBUG] 标签。
+   */
+  private async handleAbstainMockDebug(
+    task: Task,
+    originalParsed: ParsedSignalResponse
+  ): Promise<ParsedSignalResponse | null> {
+    const abstainReason = originalParsed.abstain_reason || 'no_relevant_data';
+    const abstainDetail = originalParsed.abstain_detail || '';
+
+    this.logger.warn('[agentoracle-native-plugin] ⚠️ [MOCK-DEBUG] ============================================');
+    this.logger.warn(`[agentoracle-native-plugin] ⚠️ [MOCK-DEBUG] Agent 首轮返回 abstained`);
+    this.logger.warn(`[agentoracle-native-plugin] ⚠️ [MOCK-DEBUG]   reason: ${abstainReason}`);
+    this.logger.warn(`[agentoracle-native-plugin] ⚠️ [MOCK-DEBUG]   detail: ${abstainDetail.slice(0, 200)}`);
+    this.logger.warn('[agentoracle-native-plugin] ⚠️ [MOCK-DEBUG] 发起二次请求，让 agent 模拟构造数据...');
+    this.logger.warn('[agentoracle-native-plugin] ⚠️ [MOCK-DEBUG] ============================================');
+
+    try {
+      const mockPrompt = PromptBuilder.buildMockSignalPrompt({
+        question: task.question,
+        context: task.description,
+        abstainReason,
+        abstainDetail,
+      });
+      this.logger.info(`[agentoracle-native-plugin] [MOCK-DEBUG] 📝 Mock 提示词长度: ${mockPrompt.length} 字符`);
+      this.logger.info('[agentoracle-native-plugin] [MOCK-DEBUG] 📤 发送 mock 请求到 OpenClaw Gateway...');
+
+      const mockResponse = await this.wsClient.sendMessage(mockPrompt);
+      if (!mockResponse) {
+        this.logger.error('[agentoracle-native-plugin] [MOCK-DEBUG] ❌ Mock 请求通信失败');
+        return null;
+      }
+
+      this.logger.info(`[agentoracle-native-plugin] [MOCK-DEBUG] 📥 Mock 响应长度: ${mockResponse.length} 字符`);
+      this.logger.info('[agentoracle-native-plugin] ========================================');
+      this.logger.info('[agentoracle-native-plugin] 📝 [MOCK-DEBUG] AI 模拟构造结果:');
+      this.logger.info(`[agentoracle-native-plugin] ${mockResponse}`);
+      this.logger.info('[agentoracle-native-plugin] ========================================');
+
+      // 对 mock 响应也走一遍脱敏 + 解析
+      const mockSanitized = this.sanitizer.sanitize(mockResponse);
+      const mockParsed = SignalParser.parse(mockSanitized.sanitized);
+
+      if (mockParsed.status === 'abstained' || mockParsed.signals.length === 0) {
+        this.logger.error('[agentoracle-native-plugin] [MOCK-DEBUG] ❌ Mock 响应解析失败或仍为 abstained');
+        return null;
+      }
+
+      // 给 mock 生成的每条信号强制打上 [MOCK-DEBUG] 标签
+      mockParsed.signals = mockParsed.signals.map(sig => ({
+        ...sig,
+        source_description: sig.source_description?.includes('[MOCK-DEBUG]')
+          ? sig.source_description
+          : `[MOCK-DEBUG] ${sig.source_description ?? ''}`.trim(),
+      }));
+
+      this.logger.info(`[agentoracle-native-plugin] [MOCK-DEBUG] ✅ Agent 成功模拟构造 ${mockParsed.signals.length} 条信号，继续正常提交流程`);
+      return mockParsed;
+    } catch (mockErr) {
+      this.logger.error('[agentoracle-native-plugin] [MOCK-DEBUG] 二次请求异常', mockErr as Error);
+      return null;
+    }
   }
 
   /**
@@ -266,7 +433,6 @@ export class Daemon {
     } else if (error instanceof RateLimitError) {
       this.logger.error('[agentoracle-native-plugin] Rate limit error', error);
       // 限流错误：等待 retry-after 时间
-      // 注意：这里简化处理，实际应该调整下次轮询时间
     } else {
       this.logger.error('[agentoracle-native-plugin] Unknown error', error);
       // 其他错误：记录日志，继续下一轮

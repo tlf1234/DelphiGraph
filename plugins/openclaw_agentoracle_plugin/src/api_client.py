@@ -26,9 +26,9 @@ except ImportError:
 # Matches AgentOracle API response format from get_smart_distributed_tasks
 TASK_SCHEMA = {
     "type": "object",
-    "required": ["id", "question"],
+    "required": ["task_id", "question"],
     "properties": {
-        "id": {
+        "task_id": {
             "type": "string",
             "minLength": 1,
             "maxLength": 100
@@ -124,9 +124,17 @@ class AgentOracleClient:
             ... )
             >>> # Uses configured base URL
         """
-        # Validate base_url uses HTTPS (except for localhost development)
-        if not base_url.startswith("https://") and not base_url.startswith("http://localhost"):
-            raise ValueError("API base_url must use HTTPS (except for localhost development)")
+        
+        # Validate base_url uses HTTPS (except for localhost/LAN development)
+        _is_local = (
+            base_url.startswith("http://localhost") or
+            base_url.startswith("http://127.") or
+            base_url.startswith("http://192.168.") or
+            base_url.startswith("http://10.") or
+            base_url.startswith("http://172.")
+        )
+        if not base_url.startswith("https://") and not _is_local:
+            raise ValueError("API base_url must use HTTPS (except for localhost/LAN development)")
         
         self.api_key = api_key
         self.base_url = base_url
@@ -166,7 +174,7 @@ class AgentOracleClient:
     def fetch_task(self) -> Optional[Dict[str, Any]]:
         """Fetch the next available task from the AgentOracle server.
         
-        Sends a GET request to /api/agent/tasks endpoint to retrieve the next prediction
+        Sends a GET request to /api/agent/tasks endpoint to retrieve the next
         task. The response contains a 'tasks' array which is extracted and validated.
         Returns the first valid task from the array.
         
@@ -179,9 +187,9 @@ class AgentOracleClient:
         
         Returns:
             Task dictionary containing (from get_smart_distributed_tasks):
-            - id: Unique market/task identifier (UUID string)
+            - id: Unique task identifier (UUID string)
             - title: Task title (string)
-            - question: Prediction question (string)
+            - question: Task question (string)
             - description: Task description (string, optional)
             - reward_pool: Reward amount (number)
             - closes_at: Deadline (ISO 8601 string, optional)
@@ -209,8 +217,9 @@ class AgentOracleClient:
             ...     print("No tasks available")
         """
         try:
-            # Call _make_request to send GET request to /api/agent/tasks (platform route)
+            # Call _make_request to send GET request to frontend API route
             status_code, response_data = self._make_request("GET", "/api/agent/tasks")
+            self.logger.info(f"[AgentOracle] 任务接口响应: status_code={status_code}, response_data={str(response_data)[:300]}")
             
             # Handle different status codes
             if status_code == 200:
@@ -227,13 +236,14 @@ class AgentOracleClient:
                     return None
                 
                 # Validate and return first valid task
-                for task in tasks:
+                for i, task in enumerate(tasks):
+                    self.logger.info(f"[AgentOracle] 任务[{i}]: task_id={task.get('task_id','?')}, question={str(task.get('question',''))[:80]}, keys={list(task.keys())}")
                     if self.validate_task(task):
-                        self.logger.info(f"[AgentOracle] Fetched task: {task.get('id', 'unknown')}")
+                        self.logger.info(f"[AgentOracle] Fetched task: {task.get('task_id') or task.get('id', 'unknown')}")
                         return task
                     else:
                         # Invalid task - log and skip to next
-                        self.logger.warning(f"[AgentOracle] Skipping invalid task: {task.get('id', 'unknown')}")
+                        self.logger.warning(f"[AgentOracle] Skipping invalid task: {task.get('task_id') or task.get('id', 'unknown')}")
                 
                 # All tasks failed validation
                 self.logger.error("[AgentOracle] All tasks failed validation")
@@ -257,12 +267,21 @@ class AgentOracleClient:
                     error_msg = response_data.get("message", error_msg)
                 self.logger.warning(f"[AgentOracle] {error_msg}")
                 return None
+            elif status_code == 404:
+                # Edge Function not found — not deployed yet or base_url misconfigured.
+                self.logger.warning(
+                    "[AgentOracle] ⚠️  获取任务返回 404 (Edge Function 未部署或 base_url 配置错误)，跳过本轮轮询"
+                )
+                return None
             else:
                 # Other error status codes
                 error_msg = f"Unexpected status code {status_code}"
                 if response_data and isinstance(response_data, dict):
-                    error_msg = response_data.get("message", error_msg)
-                self.logger.error(f"[AgentOracle] {error_msg}", exc_info=True)
+                    error_msg = response_data.get("error", response_data.get("message", error_msg))
+                    details = response_data.get("details", "")
+                    if details:
+                        error_msg = f"{error_msg} (details: {details})"
+                self.logger.error(f"[AgentOracle] 任务获取失败: status={status_code}, error={error_msg}")
                 raise NetworkError(error_msg)
                 
         except NetworkError:
@@ -277,22 +296,22 @@ class AgentOracleClient:
             raise NetworkError(f"Unexpected error: {e}")
     
     def submit_result(self, payload: Dict[str, Any]) -> bool:
-        """Submit prediction result to the server.
+        """Submit signal data to the server (v3.0).
         
-        Sends a POST request to /api/agent/predictions platform route with the
-        structured prediction payload. Authentication is via x-api-key header.
+        Sends a POST request to /api/agent/signals platform route with the
+        structured signal submission payload. Authentication is via x-api-key header.
         
         The payload must contain:
-        - task_id: UUID of the task being predicted
-        - probability: 0.0-1.0 prediction probability
-        - rationale: Brief explanation of the prediction
+        - task_id: UUID of the task
+        - status: "submitted" or "abstained"
+        - signals: Array of signal objects
+        - privacy_cleared: Boolean
+        - protocol_version: "3.0"
         
-        Optional structured signal fields:
-        - evidence_type: "hard_fact" | "soft_signal" | "personal_opinion"
-        - evidence_text: Key evidence summary
-        - relevance_score: 0.0-1.0 relevance score
-        - source_url: Information source URL
-        - entity_tags: Array of entity tag objects
+        Optional fields:
+        - user_persona: User persona object
+        - abstain_reason: Reason for abstaining
+        - abstain_detail: Detail for abstaining
         
         Response handling:
         - HTTP 200: Submission successful, returns True
@@ -301,7 +320,7 @@ class AgentOracleClient:
         
         Args:
             payload: Submission payload dictionary matching platform
-                /api/agent/predictions expected format.
+                /api/agent/signals expected format.
             
         Returns:
             True if submission was successful (HTTP 200).
@@ -316,17 +335,30 @@ class AgentOracleClient:
             >>> client = AgentOracleClient(api_key="abc123...")
             >>> payload = {
             ...     "task_id": "a1b2c3d4-...",
-            ...     "probability": 0.75,
-            ...     "rationale": "Based on trend analysis...",
-            ...     "evidence_type": "hard_fact"
+            ...     "status": "submitted",
+            ...     "signals": [{"signal_id": "sig_1", ...}],
+            ...     "privacy_cleared": True,
+            ...     "protocol_version": "3.0"
             ... }
             >>> success = client.submit_result(payload)
             >>> if success:
             ...     print("Submission successful")
         """
         try:
-            # Call _make_request to send POST request to /api/agent/predictions (platform route)
-            status_code, response_data = self._make_request("POST", "/api/agent/predictions", data=payload)
+            # 【UAP v3.0 调试】打印即将发送的完整 POST body
+            try:
+                import json as _json_dbg
+                body_preview = _json_dbg.dumps(payload, ensure_ascii=False, indent=2)
+                self.logger.info(f"[AgentOracle] 📤 POST /api/agent/signals - body 长度={len(body_preview)} chars, 信号数={len(payload.get('signals', []))}")
+                self.logger.info("[AgentOracle] ---- POST body BEGIN ----")
+                for line in body_preview.split("\n"):
+                    self.logger.info(f"[AgentOracle] > {line}")
+                self.logger.info("[AgentOracle] ---- POST body END ----")
+            except Exception as _dbg_err:
+                self.logger.warning(f"[AgentOracle] 打印 POST body 失败: {_dbg_err}")
+            
+            # Call _make_request to send POST request to frontend API route
+            status_code, response_data = self._make_request("POST", "/api/agent/signals", data=payload)
             
             # Handle different status codes
             if status_code == 200:
@@ -398,7 +430,7 @@ class AgentOracleClient:
             >>> task = {
             ...     "id": "task-123",
             ...     "question": "Will it rain?",
-            ...     "title": "Weather prediction"
+            ...     "title": "Weather analysis"
             ... }
             >>> if client.validate_task(task):
             ...     # Process valid task
@@ -476,6 +508,7 @@ class AgentOracleClient:
         
         # Build full URL from base_url + endpoint
         url = f"{self.base_url}{endpoint}"
+        self.logger.info(f"[AgentOracle] 🌐 请求 URL: {method} {url}")
         
         # Set timeout to 30 seconds
         timeout = 30
@@ -490,10 +523,12 @@ class AgentOracleClient:
             
             # Return tuple of (status_code, response_data)
             # For non-JSON responses or empty responses, return None as data
+            self.logger.info(f"[AgentOracle] HTTP响应: status={response.status_code}, content-type={response.headers.get('content-type','N/A')}, length={len(response.content)}")
             try:
                 response_data = response.json()
             except ValueError:
                 response_data = None
+                self.logger.warning(f"[AgentOracle] 响应非JSON: body={response.text[:200]}")
             
             return (response.status_code, response_data)
             
@@ -540,8 +575,9 @@ class AgentOracleClient:
             )
             
             if status_code == 200 and response_data:
-                completed_tasks = response_data.get("completed_tasks", 0)
+                # /api/agent/stats returns reputation_score and completed_tasks directly
                 reputation_score = response_data.get("reputation_score", 0)
+                completed_tasks = response_data.get("completed_tasks", 0)
                 
                 stats = {
                     "total_earnings": 0,

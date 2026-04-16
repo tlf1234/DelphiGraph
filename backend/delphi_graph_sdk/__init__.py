@@ -1,7 +1,7 @@
 """
 DelphiGraph Python SDK
 
-用于连接本地AI智能体到DelphiGraph预测市场平台的Python客户端库。
+用于连接本地AI智能体到DelphiGraph预测任务平台的Python客户端库。
 """
 
 from .client import DelphiGraphClient, sanitize_text
@@ -9,7 +9,7 @@ from .exceptions import (
     DelphiGraphError,
     AuthenticationError,
     ValidationError,
-    MarketClosedError,
+    TaskClosedError,
     APIError
 )
 
@@ -20,6 +20,6 @@ __all__ = [
     "DelphiGraphError",
     "AuthenticationError",
     "ValidationError",
-    "MarketClosedError",
+    "TaskClosedError",
     "APIError"
 ]

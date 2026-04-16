@@ -1,13 +1,10 @@
 import type { OpenClawPluginApi } from 'openclaw/plugin-sdk';
-
 // ============ OpenClaw SDK 类型 ============
-
 /**
  * 插件日志接口
  * 从 OpenClaw Plugin SDK 的 api.logger 类型派生
  */
 export type PluginLogger = OpenClawPluginApi['logger'];
-
 /**
  * 插件模块接口
  * 遵循 OpenClaw Plugin SDK 标准的插件定义
@@ -19,9 +16,7 @@ export interface AgentOraclePluginModule {
   configSchema?: unknown;
   register(api: OpenClawPluginApi): void;
 }
-
 // ============ API 数据模型 ============
-
 /**
  * 任务数据结构
  * 从平台 /api/agent/tasks 返回的智能分发任务
@@ -46,39 +41,63 @@ export interface Task {
   match_reason: string;
   created_at: string;
 }
-
+// ============ UAP v3.0 数据模型 ============
 /**
- * 预测提交数据结构
- * 提交到平台 /api/agent/predictions 的预测结果
- * 字段与 PredictionRequest 接口对齐
+ * 数据因子信号 (v3.0)
+ * 单条数据因子，包含原始事实和相关性推理
  */
-export interface PredictionSubmission {
-  taskId: string;
-  probability: number;
-  rationale: string;
-  evidence_type?: 'hard_fact' | 'persona_inference';
-  evidence_text?: string;
-  relevance_score?: number;
-  entity_tags?: Array<{ text: string; type: string; role: string }>;
-  privacy_cleared?: boolean;
-  source_url?: string;
-  user_persona?: Record<string, unknown>;
-}
-
-/**
- * LLM 结构化输出
- * 从 LLM 响应中解析出的预测结构数据
- */
-export interface ParsedPrediction {
-  probability: number;
-  rationale: string;
+export interface Signal {
+  signal_id: string;
   evidence_type: 'hard_fact' | 'persona_inference';
+  source_type: string;
+  data_exclusivity?: 'private' | 'semi_private' | 'public';
+  source_description?: string;
+  observed_at?: string;
   evidence_text: string;
-  relevance_score: number;
-  source_urls: string[];
-  entity_tags: Array<{ text: string; type: string; role: string }>;
+  relevance_reasoning: string;
+  relevance_score?: number;
+  source_urls?: string[];
+  entity_tags?: Array<{ text: string; type: string; role: string }>;
 }
-
+/**
+ * 用户画像 (v3.0)
+ */
+export interface UserPersona {
+  occupation?: string;
+  age_range?: string;
+  region?: string;
+  interests?: string[];
+  income_level?: string;
+  consumption_style?: string;
+  risk_appetite?: string;
+  [key: string]: unknown;
+}
+/**
+ * 从 OpenClaw 响应中解析出的结构化信号数据 (v3.0)
+ */
+export interface ParsedSignalResponse {
+  status: 'submitted' | 'abstained';
+  signals: Signal[];
+  user_persona?: UserPersona;
+  abstain_reason?: string;
+  abstain_detail?: string;
+}
+/**
+ * 信号提交数据结构 (v3.0)
+ * 提交到平台 /api/agent/signals 的数据因子
+ */
+export interface SignalSubmission {
+  task_id: string;
+  status: 'submitted' | 'abstained';
+  signals?: Signal[];
+  user_persona?: UserPersona;
+  abstain_reason?: string;
+  abstain_detail?: string;
+  model_name?: string;
+  plugin_version?: string;
+  privacy_cleared: boolean;
+  protocol_version: '3.0';
+}
 /**
  * 统计数据结构
  * 从 AgentOracle API 获取的用户统计信息
@@ -89,9 +108,7 @@ export interface Stats {
   reputation_score: number;
   rank?: number;
 }
-
 // ============ 内部数据模型 ============
-
 /**
  * 脱敏结果数据结构
  * 包含原始文本和脱敏后的文本
@@ -100,7 +117,6 @@ export interface SanitizationResult {
   original: string;
   sanitized: string;
 }
-
 /**
  * 审计日志条目数据结构
  * 用于记录脱敏前后的对比信息
@@ -111,13 +127,13 @@ export interface LogEntry {
   original: string;
   sanitized: string;
 }
-
 /**
  * 插件配置数据结构
  * 从 OpenClaw 配置系统读取的完整配置
  */
 export interface PluginConfig {
   apiKey: string;
+  apiBaseUrl: string;
   gatewayUrl: string;
   gatewayToken: string;
   pollingIntervalSeconds: number;
@@ -127,7 +143,6 @@ export interface PluginConfig {
   dailyReportHour?: number;
   dailyReportMinute?: number;
 }
-
 /**
  * 守护进程配置数据结构
  * 用于初始化 Daemon 的配置参数
@@ -136,7 +151,6 @@ export interface DaemonConfig {
   pollingIntervalSeconds: number;
   jitterSeconds: number;
 }
-
 /**
  * WebSocket 配置数据结构
  * 用于初始化 WebSocket Client 的配置参数
@@ -149,10 +163,20 @@ export interface WebSocketConfig {
   retryDelayBase: number;
   connectTimeout: number;
   messageTimeout: number;
+  deviceIdentityFile?: string;
 }
-
+/**
+ * 设备身份参数
+ * connect 请求中携带的 device identity 字段
+ */
+export interface DeviceParams {
+  id: string;
+  publicKey: string;
+  signature: string;
+  signedAt: number;
+  nonce: string;
+}
 // ============ WebSocket Protocol v3 消息类型 ============
-
 /**
  * 连接挑战事件
  * Gateway 发送的认证挑战
@@ -164,7 +188,6 @@ export interface ConnectChallengeEvent {
     nonce: string;
   };
 }
-
 /**
  * 连接请求
  * 客户端发送的连接请求
@@ -190,11 +213,11 @@ export interface ConnectRequest {
     auth: {
       token: string;
     };
+    device?: DeviceParams;
     locale: string;
     userAgent: string;
   };
 }
-
 /**
  * 连接响应
  * Gateway 返回的连接响应
@@ -212,7 +235,6 @@ export interface ConnectResponse {
   };
   error?: string;
 }
-
 /**
  * 聊天发送请求
  * 客户端发送的聊天消息
@@ -227,7 +249,6 @@ export interface ChatSendRequest {
     idempotencyKey: string;
   };
 }
-
 /**
  * 聊天事件
  * Gateway 返回的聊天事件（流式响应）
@@ -244,9 +265,7 @@ export interface ChatEvent {
     };
   };
 }
-
 // ============ 错误类型 ============
-
 /**
  * 网络错误
  * 当无法连接到 AgentOracle API 时抛出
@@ -257,7 +276,6 @@ export class NetworkError extends Error {
     this.name = 'NetworkError';
   }
 }
-
 /**
  * 认证错误
  * 当 API Key 无效或过期时抛出
@@ -268,21 +286,18 @@ export class AuthenticationError extends Error {
     this.name = 'AuthenticationError';
   }
 }
-
 /**
  * 限流错误
  * 当请求频率超过限制时抛出
  */
 export class RateLimitError extends Error {
   public retryAfter: number;
-
   constructor(message: string, retryAfter: number) {
     super(message);
     this.name = 'RateLimitError';
     this.retryAfter = retryAfter;
   }
 }
-
 /**
  * 配置错误
  * 当配置验证失败时抛出
@@ -293,10 +308,3 @@ export class ConfigError extends Error {
     this.name = 'ConfigError';
   }
 }
-
-// ============ 向后兼容类型别名 ============
-
-/**
- * @deprecated 使用 PluginLogger 替代
- */
-export type OpenClawLogger = PluginLogger;

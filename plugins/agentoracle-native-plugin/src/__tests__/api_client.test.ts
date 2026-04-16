@@ -61,9 +61,9 @@ describe('APIClient', () => {
     it('应该成功获取任务', async () => {
       const mockTask = {
         id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-        title: 'Weather Prediction',
+        title: 'Weather Analysis',
         question: 'What is the weather?',
-        description: 'Weather prediction task',
+        description: 'Weather analysis task',
         reward_pool: 100,
         closes_at: '2024-12-31T23:59:59Z',
         visibility: 'public',
@@ -157,69 +157,86 @@ describe('APIClient', () => {
     });
   });
 
-  describe('submitResult()', () => {
-    it('应该成功提交预测结果', async () => {
+  describe('submitSignals()', () => {
+    it('应该成功提交信号数据', async () => {
       const submission = {
-        taskId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-        probability: 0.75,
-        rationale: 'Based on analysis, the outcome is likely positive.',
-        evidence_type: 'hard_fact' as const,
+        task_id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        status: 'submitted' as const,
+        signals: [{
+          signal_id: 'sig_test1',
+          evidence_type: 'hard_fact' as const,
+          source_type: 'web_news',
+          evidence_text: 'Based on analysis, the outcome is likely positive.',
+          relevance_reasoning: 'Directly related to the question.',
+        }],
+        privacy_cleared: true,
+        protocol_version: '3.0' as const,
       };
 
       const scope = nock(API_BASE_URL)
-        .post(`${API_PATH_PREFIX}/api/agent/predictions`, submission)
-        .reply(200, { success: true, predictionId: 'pred-123' });
+        .post(`${API_PATH_PREFIX}/api/agent/signals`, submission)
+        .reply(200, { success: true, submissionId: 'sub-123' });
 
-      await expect(apiClient.submitResult(submission)).resolves.not.toThrow();
+      await expect(apiClient.submitSignals(submission)).resolves.not.toThrow();
       expect(scope.isDone()).toBe(true);
     });
 
     it('应该处理包含完整结构化信号字段的提交', async () => {
       const submission = {
-        taskId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-        probability: 0.8,
-        rationale: 'Detailed analysis with evidence.',
-        evidence_type: 'hard_fact' as const,
-        evidence_text: 'Key evidence text',
-        relevance_score: 0.9,
-        entity_tags: [{ text: 'Bitcoin', type: 'asset', role: 'subject' }],
-        source_url: 'https://example.com/source',
+        task_id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        status: 'submitted' as const,
+        signals: [{
+          signal_id: 'sig_test2',
+          evidence_type: 'hard_fact' as const,
+          source_type: 'web_search',
+          evidence_text: 'Key evidence text with detailed analysis.',
+          relevance_reasoning: 'High relevance due to direct market impact.',
+          relevance_score: 0.9,
+          entity_tags: [{ text: 'Bitcoin', type: 'asset', role: 'subject' }],
+          source_urls: ['https://example.com/source'],
+        }],
+        privacy_cleared: true,
+        protocol_version: '3.0' as const,
       };
 
       const scope = nock(API_BASE_URL)
-        .post(`${API_PATH_PREFIX}/api/agent/predictions`, submission)
-        .reply(200, { success: true, predictionId: 'pred-456' });
+        .post(`${API_PATH_PREFIX}/api/agent/signals`, submission)
+        .reply(200, { success: true, submissionId: 'sub-456' });
 
-      await expect(apiClient.submitResult(submission)).resolves.not.toThrow();
+      await expect(apiClient.submitSignals(submission)).resolves.not.toThrow();
       expect(scope.isDone()).toBe(true);
     });
 
     it('当认证失败时应该抛出 AuthenticationError', async () => {
       const submission = {
-        taskId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-        probability: 0.5,
-        rationale: 'Test',
+        task_id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        status: 'submitted' as const,
+        signals: [],
+        privacy_cleared: true,
+        protocol_version: '3.0' as const,
       };
 
       nock(API_BASE_URL)
-        .post(`${API_PATH_PREFIX}/api/agent/predictions`)
+        .post(`${API_PATH_PREFIX}/api/agent/signals`)
         .reply(401);
 
-      await expect(apiClient.submitResult(submission)).rejects.toThrow(AuthenticationError);
+      await expect(apiClient.submitSignals(submission)).rejects.toThrow(AuthenticationError);
     });
 
     it('当请求参数错误时应该抛出 NetworkError (400)', async () => {
       const submission = {
-        taskId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-        probability: 0.5,
-        rationale: 'Test',
+        task_id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        status: 'submitted' as const,
+        signals: [],
+        privacy_cleared: true,
+        protocol_version: '3.0' as const,
       };
 
       nock(API_BASE_URL)
-        .post(`${API_PATH_PREFIX}/api/agent/predictions`)
+        .post(`${API_PATH_PREFIX}/api/agent/signals`)
         .reply(400);
 
-      await expect(apiClient.submitResult(submission)).rejects.toThrow(NetworkError);
+      await expect(apiClient.submitSignals(submission)).rejects.toThrow(NetworkError);
     });
   });
 
@@ -296,13 +313,15 @@ describe('APIClient', () => {
           'content-type': 'application/json'
         }
       })
-        .post(`${API_PATH_PREFIX}/api/agent/predictions`)
+        .post(`${API_PATH_PREFIX}/api/agent/signals`)
         .reply(200);
 
-      await apiClient.submitResult({
-        taskId: 'test-market-id',
-        probability: 0.5,
-        rationale: 'test rationale',
+      await apiClient.submitSignals({
+        task_id: 'test-task-id',
+        status: 'submitted',
+        signals: [],
+        privacy_cleared: true,
+        protocol_version: '3.0',
       });
 
       expect(scope.isDone()).toBe(true);

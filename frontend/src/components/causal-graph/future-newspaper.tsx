@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useEffect, useState } from 'react'
+import React, { useMemo, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { TrendingUp, TrendingDown, Minus, AlertTriangle, Zap, BarChart3, Shield } from 'lucide-react'
 
@@ -18,6 +18,11 @@ interface FutureNewspaperProps {
     persona_insight?: string
     conflicts?: string
     one_line_conclusion?: string
+    critical_paths?: string[][]
+    sensitivity_scores?: Record<string, number>
+    counterfactual?: string
+    inflection_point?: string
+    second_order_effects?: string[]
   } | null
   isFinal?: boolean
   version?: number
@@ -27,9 +32,56 @@ interface FutureNewspaperProps {
     persona_count?: number
     persona_summary?: { coverage_rate?: number; dimensions?: Record<string, Record<string, number>> }
   } | null
-  marketQuestion?: string
+  taskQuestion?: string
   className?: string
   revealed?: boolean
+}
+
+// ── 内联 Markdown 渲染（**bold** → <strong>）──
+function renderInline(text: string): (string | React.JSX.Element)[] {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g)
+  return parts.map((part, i) =>
+    part.startsWith('**') && part.endsWith('**')
+      ? <strong key={i} className="text-zinc-100 font-semibold">{part.slice(2, -2)}</strong>
+      : part
+  )
+}
+
+// ── 内容分段器（将正文拆为段落 vs Markdown 表格块） ──
+type TextSegment = { type: 'paragraph'; text: string; idx: number }
+type TableSegment = { type: 'table'; headers: string[]; rows: string[][] }
+type ContentSegment = TextSegment | TableSegment
+
+function segmentContent(content: string): ContentSegment[] {
+  const lines = content.split('\n')
+  const segments: ContentSegment[] = []
+  let i = 0
+  let pIdx = 0
+
+  while (i < lines.length) {
+    const line = lines[i].trim()
+    if (!line) { i++; continue }
+
+    if (line.startsWith('|')) {
+      const tableLines: string[] = []
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        tableLines.push(lines[i].trim())
+        i++
+      }
+      const contentRows = tableLines.filter(l => !l.match(/^\|[\s\-|]+\|$/))
+      if (contentRows.length >= 2) {
+        const parse = (l: string) => l.split('|').slice(1, -1).map(c => c.trim())
+        const [headerRow, ...dataRows] = contentRows
+        segments.push({ type: 'table', headers: parse(headerRow), rows: dataRows.map(parse) })
+      } else if (contentRows.length === 1) {
+        segments.push({ type: 'paragraph', text: contentRows[0], idx: pIdx++ })
+      }
+    } else {
+      segments.push({ type: 'paragraph', text: line, idx: pIdx++ })
+      i++
+    }
+  }
+  return segments
 }
 
 // ── 未来日期生成 ──
@@ -190,22 +242,27 @@ export default function FutureNewspaper({
   isFinal = false,
   version,
   preprocessSummary,
-  marketQuestion,
+  taskQuestion,
   className = '',
   revealed = false,
 }: FutureNewspaperProps) {
   const futureDate = useMemo(() => getFutureDate(), [])
 
   // 所有派生数据必须在 early return 之前计算，避免违反 Hooks 规则
-  const paragraphs = content?.split('\n').filter(p => p.trim()) || []
-  const headlineIdx = paragraphs.findIndex(p => p.startsWith('#'))
-  const headline = headlineIdx >= 0
-    ? paragraphs[headlineIdx].replace(/^#+\s*/, '')
-    : conclusion?.one_line_conclusion || marketQuestion || ''
-  const bodyParagraphs = paragraphs.filter((_, i) => i !== headlineIdx)
+  const segments = useMemo(() => content ? segmentContent(content) : [], [content])
+  const headlineSegIdx = segments.findIndex(s => s.type === 'paragraph' && s.text.startsWith('#'))
+  const headline = headlineSegIdx >= 0
+    ? (segments[headlineSegIdx] as { type: 'paragraph'; text: string }).text.replace(/^#+\s*/, '')
+    : conclusion?.one_line_conclusion || taskQuestion || ''
+  const bodySegments = segments.filter((_, i) => i !== headlineSegIdx)
+
+  // bodyParagraphs for pullQuote (text-only, no table segments)
+  const bodyParagraphs = bodySegments
+    .filter((s): s is TextSegment => s.type === 'paragraph')
+    .map(s => s.text)
 
   const pullQuote = useMemo(() => {
-    const candidates = bodyParagraphs.filter(p => p.trim() && !p.startsWith('#') && !p.includes('编者注') && p.length > 30)
+    const candidates = bodyParagraphs.filter(p => !p.startsWith('#') && !p.includes('编者注') && p.length > 30)
     const src = candidates[1] || candidates[0]
     if (!src) return null
     return src.length > 85 ? src.slice(0, 85) + '……' : src
@@ -246,7 +303,7 @@ export default function FutureNewspaper({
     transition: { duration: 0.5, ease: [0.25, 0.8, 0.25, 1], delay },
   })
 
-  const firstBodyIdx = bodyParagraphs.findIndex(p => p.trim() && !p.startsWith('#'))
+  const firstBodyParaIdx = bodyParagraphs.findIndex(p => p.trim() && !p.startsWith('#'))
 
   return (
     <div className={`mx-3 ${className}`}>
@@ -397,14 +454,42 @@ export default function FutureNewspaper({
         )}
 
         {/* ── 正文 + 侧边栏 ── */}
-        {(bodyParagraphs.length > 0 || conclusion?.key_drivers?.length || conclusion?.risk_factors?.length) && (
+        {(bodySegments.length > 0 || conclusion?.key_drivers?.length || conclusion?.risk_factors?.length || conclusion?.critical_paths?.length) && (
           <motion.div className="relative z-10 px-5 pb-4" {...sec(0.48)}>
             <div className="flex gap-4 items-start">
 
               {/* 正文列 */}
               <div className="flex-1 min-w-0 text-[12px] text-zinc-300/90 leading-[1.9]">
-                {bodyParagraphs.map((paragraph, i) => {
-                  if (!paragraph.trim()) return null
+                {bodySegments.map((seg, i) => {
+                  if (seg.type === 'table') {
+                    return (
+                      <div key={i} className="my-3 overflow-x-auto rounded border border-zinc-800/60">
+                        <table className="w-full text-[10px] border-collapse">
+                          <thead>
+                            <tr className="bg-zinc-800/40">
+                              {seg.headers.map((h, hi) => (
+                                <th key={hi} className="px-2 py-1.5 text-left text-zinc-400 font-mono font-semibold border-b border-zinc-700/50 whitespace-nowrap">
+                                  {h}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {seg.rows.map((row, ri) => (
+                              <tr key={ri} className={ri % 2 === 0 ? 'bg-transparent' : 'bg-zinc-800/20'}>
+                                {row.map((cell, ci) => (
+                                  <td key={ci} className="px-2 py-1 text-zinc-400 border-b border-zinc-800/30 whitespace-nowrap">
+                                    {renderInline(cell)}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )
+                  }
+                  const paragraph = seg.text
                   if (paragraph.startsWith('#')) {
                     const text = paragraph.replace(/^#+\s*/, '')
                     return (
@@ -414,7 +499,7 @@ export default function FutureNewspaper({
                         style={{ fontFamily: "'Noto Serif SC','Source Han Serif SC',serif" }}
                       >
                         <span className="text-amber-500/50 text-[10px]">§</span>
-                        {text}
+                        {renderInline(text)}
                       </h4>
                     )
                   }
@@ -423,12 +508,12 @@ export default function FutureNewspaper({
                       <div key={i} className="mt-5 pt-3 border-t border-dashed border-zinc-800/60">
                         <div className="flex items-start gap-2">
                           <div className="w-0.5 bg-amber-500/30 rounded-full shrink-0 self-stretch" />
-                          <p className="text-[10px] text-zinc-500 italic leading-relaxed">{paragraph}</p>
+                          <p className="text-[10px] text-zinc-500 italic leading-relaxed">{renderInline(paragraph)}</p>
                         </div>
                       </div>
                     )
                   }
-                  if (i === firstBodyIdx && paragraph.length > 6) {
+                  if (seg.idx === firstBodyParaIdx && paragraph.length > 6) {
                     const first = paragraph[0]
                     const rest = paragraph.slice(1)
                     return (
@@ -439,17 +524,78 @@ export default function FutureNewspaper({
                         >
                           {first}
                         </span>
-                        {rest}
+                        {renderInline(rest)}
                       </p>
                     )
                   }
-                  return <p key={i} className="mb-2.5 indent-5">{paragraph}</p>
+                  return <p key={i} className="mb-2.5 indent-5">{renderInline(paragraph)}</p>
                 })}
               </div>
 
               {/* 侧边栏 */}
-              {(conclusion?.key_drivers?.length || conclusion?.risk_factors?.length || (conclusion?.persona_insight && conclusion.persona_insight !== '无')) && (
+              {(conclusion?.key_drivers?.length || conclusion?.risk_factors?.length || conclusion?.critical_paths?.length || (conclusion?.persona_insight && conclusion.persona_insight !== '无')) && (
                 <div className="w-[138px] shrink-0 space-y-2.5 pt-0.5">
+
+                  {/* ── 核心因果链 ── */}
+                  {conclusion?.critical_paths && conclusion.critical_paths.length > 0 && (() => {
+                    const path = conclusion.critical_paths[0]
+                    const topSensitivity = conclusion.sensitivity_scores
+                      ? Object.entries(conclusion.sensitivity_scores)
+                          .sort((a, b) => b[1] - a[1])
+                          .slice(0, 4)
+                      : []
+                    const maxScore = topSensitivity[0]?.[1] || 1
+                    return (
+                      <div className="rounded border border-violet-500/15 bg-violet-500/[0.025] p-2.5">
+                        <div className="text-[7px] text-violet-400/65 tracking-[0.35em] font-mono mb-2 pb-1 border-b border-violet-500/10 flex items-center gap-1">
+                          <BarChart3 className="w-2.5 h-2.5" />
+                          CAUSAL PATH
+                        </div>
+                        <div className="space-y-0.5 mb-2">
+                          {path.map((node, ni) => (
+                            <div key={ni} className="flex items-center gap-1">
+                              {ni > 0 && <div className="text-violet-500/40 text-[8px] shrink-0 ml-1">↓</div>}
+                              <div className={`text-[9px] leading-tight px-1.5 py-0.5 rounded ${
+                                ni === path.length - 1
+                                  ? 'text-amber-400 bg-amber-500/10 border border-amber-500/20 font-semibold'
+                                  : ni === 0
+                                  ? 'text-violet-300 bg-violet-500/10'
+                                  : 'text-zinc-400'
+                              }`}>
+                                {node.length > 10 ? node.slice(0, 10) + '…' : node}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {topSensitivity.length > 0 && (
+                          <>
+                            <div className="text-[7px] text-violet-400/50 tracking-[0.3em] font-mono mb-1.5 mt-2 border-t border-violet-500/10 pt-1.5">
+                              SENSITIVITY
+                            </div>
+                            <div className="space-y-1">
+                              {topSensitivity.map(([name, score], si) => (
+                                <div key={si} className="space-y-0.5">
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className="text-[9px] text-zinc-400 truncate leading-tight">
+                                      {name.length > 9 ? name.slice(0, 9) + '…' : name}
+                                    </span>
+                                    <span className="text-[8px] text-violet-400/70 font-mono shrink-0">{score.toFixed(2)}</span>
+                                  </div>
+                                  <div className="h-[3px] bg-zinc-800 rounded-full overflow-hidden">
+                                    <div
+                                      className="h-full rounded-full bg-gradient-to-r from-violet-500/60 to-violet-400/40"
+                                      style={{ width: `${(score / maxScore) * 100}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )
+                  })()}
+
                   {conclusion?.key_drivers && conclusion.key_drivers.length > 0 && (
                     <div className="rounded border border-emerald-500/15 bg-emerald-500/[0.03] p-2.5">
                       <div className="text-[7px] text-emerald-400/65 tracking-[0.35em] font-mono mb-2 pb-1 border-b border-emerald-500/10 flex items-center gap-1">

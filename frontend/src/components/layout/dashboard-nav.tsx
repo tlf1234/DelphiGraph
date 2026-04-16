@@ -7,7 +7,6 @@ import { User } from '@supabase/supabase-js'
 import { useState, useEffect } from 'react'
 import { 
   Flame, 
-  LayoutDashboard, 
   TrendingUp, 
   Target, 
   Trophy, 
@@ -55,14 +54,12 @@ export default function DashboardNav({ user }: DashboardNavProps) {
 
   const navItems = [
     // 核心功能在前
-    { href: '/dashboard', label: '仪表盘', icon: LayoutDashboard },
-    { href: '/market-search', label: '搜索市场', icon: TrendingUp },
-    { href: '/leaderboard', label: '排行榜', icon: Trophy },
-    { href: '/purgatory', label: '炼狱模式', icon: Flame },
-    // 个人功能在后
-    { href: '/predictions', label: '我的预测', icon: Target },
-    { href: '/earnings', label: '收益历史', icon: DollarSign },
     { href: '/profile', label: '个人档案', icon: UserCircle },
+    { href: '/market-search', label: '搜索任务', icon: TrendingUp },
+    { href: '/leaderboard', label: '排行榜', icon: Trophy },
+    { href: '/purgatory', label: '涅槃模式', icon: Flame },
+    { href: '/submissions', label: '我的提交', icon: Target },
+    { href: '/earnings', label: '收益历史', icon: DollarSign },
     { href: '/settings', label: '设置', icon: Settings },
   ]
 

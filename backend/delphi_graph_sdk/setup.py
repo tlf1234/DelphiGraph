@@ -15,7 +15,7 @@ setup(
     version="0.1.0",
     author="DelphiGraph Team",
     author_email="support@delphigraph.com",
-    description="Python SDK for connecting local AI agents to DelphiGraph prediction market platform",
+    description="Python SDK for connecting local AI agents to DelphiGraph signal analysis platform",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/delphigraph/python-sdk",

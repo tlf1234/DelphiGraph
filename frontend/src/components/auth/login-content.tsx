@@ -2,7 +2,7 @@
 
 import { useTranslation } from '@/hooks/use-translation'
 import LoginButton from '@/components/auth/login-button'
-import LanguageSwitcher from '@/components/language-switcher'
+import LanguageSwitcher from '@/components/shared/language-switcher'
 import Link from 'next/link'
 
 export default function LoginContent() {

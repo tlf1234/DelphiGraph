@@ -7,6 +7,6 @@ causal_engine/api_service.py  兼容转发层
 from api_service import (  # noqa: F401
     app,
     main,
-    run_analysis_for_market,
+    run_analysis_for_task,
     polling_loop,
 )

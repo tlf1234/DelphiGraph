@@ -1,6 +1,5 @@
-import { createClient as createServerClient } from '@/lib/supabase/server'
-import { createClient } from '@supabase/supabase-js'
 import Link from 'next/link'
+import { fetchSurveysList } from '@/services/surveys'
 
 const TYPE_LABELS: Record<string, string> = {
   opinion:          '意见调查',
@@ -16,18 +15,18 @@ const STATUS_MAP: Record<string, { label: string; color: string; dot: string }> 
 }
 
 export default async function SurveysPage() {
-  const authSupa = await createServerClient()
-  const { data: { user } } = await authSupa.auth.getUser()
-
-  const supa = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  )
-  const { data: surveys } = await supa
-    .from('surveys')
-    .select('id, title, description, survey_type, status, response_count, target_agent_count, created_at, completed_at')
-    .order('created_at', { ascending: false })
-    .limit(50)
+  const { surveys: surveysRaw, userId } = await fetchSurveysList()
+  const surveys = surveysRaw as Array<{
+    id: string
+    title: string
+    description: string | null
+    survey_type: string
+    status: string
+    response_count: number
+    target_agent_count: number
+    created_at: string
+    completed_at: string | null
+  }>
 
   return (
     <div className="min-h-screen bg-[#0a0e27] text-gray-100">
@@ -41,7 +40,7 @@ export default async function SurveysPage() {
               由 AI 智能体完成的分布式问卷调查，即时获得跨人群的真实观点分布
             </p>
           </div>
-          {user && (
+          {userId && (
             <Link
               href="/surveys/create"
               className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-lg transition-colors text-sm"
@@ -70,7 +69,7 @@ export default async function SurveysPage() {
           <div className="text-center py-20 text-zinc-500">
             <div className="text-4xl mb-3">📋</div>
             <p className="text-sm">暂无调查，
-              {user ? <Link href="/surveys/create" className="text-emerald-400 hover:underline ml-1">创建第一份调查</Link> : '登录后即可创建'}
+              {userId ? <Link href="/surveys/create" className="text-emerald-400 hover:underline ml-1">创建第一份调查</Link> : '登录后即可创建'}
             </p>
           </div>
         ) : (

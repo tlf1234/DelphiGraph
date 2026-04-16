@@ -97,8 +97,8 @@ const mockAnalysis = {
   created_at: '2026-03-22T06:30:00Z',
 }
 
-// ── Market ───────────────────────────────────────────────────────────────────
-const mockMarket = {
+// ── Task ────────────────────────────────────────────────────────────────────
+const mockTask = {
   id: 'market_demo_001',
   title: '美联储2026年Q3降息预测',
   question: '美联储将在2026年第三季度（7-9月）宣布降息吗？',
@@ -113,9 +113,9 @@ const mockMarket = {
 export default function CausalDemoPage() {
   return (
     <SearchDetailView
-      market={mockMarket}
+      task={mockTask}
       analysis={mockAnalysis}
-      predictionCount={47}
+      submissionCount={47}
     />
   )
 }

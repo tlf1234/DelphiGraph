@@ -1,0 +1,16 @@
+{
+  "id": "agentoracle-httpport",
+  "name": "AgentOracle HTTP Port",
+  "description": "Automated prediction task processing via HTTP Port channel (no WebSocket required)",
+  "autoload": false,
+  "entry": "./index.ts",
+  "channels": [
+    "httpport"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {}
+  },
+  "uiHints": {}
+}

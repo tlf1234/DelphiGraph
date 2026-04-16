@@ -11,6 +11,11 @@ import threading
 import queue
 import json
 import logging
+import os
+import sys
+import time
+import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -85,6 +90,10 @@ class AgentOracleGUI:
         
         # 日志队列
         self.log_queue = queue.Queue()
+        
+        # 仿真状态
+        self._sim_running = False
+        self._sim_abort = threading.Event()
         
         # 设置日志记录器并添加 GUI 处理器
         self.logger = setup_logger()
@@ -395,6 +404,11 @@ class AgentOracleGUI:
             font=self.default_font
         )
         self.submissions_stats_label.pack(side=tk.RIGHT, padx=5)
+        
+        # 仿真选项卡
+        sim_frame = ttk.Frame(notebook)
+        notebook.add(sim_frame, text="🔬 仿真")
+        self._create_sim_tab(sim_frame)
         
         # ===== 底部状态栏 =====
         status_bar = ttk.Frame(self.root)
@@ -820,6 +834,16 @@ class AgentOracleGUI:
                     except:
                         pass
                 
+                # UAP v3.0：从 signals 数组首条取 evidence_type 作为列表展示
+                _sanitized = sub.get('sanitized_submission', {}) or {}
+                _signals = _sanitized.get('signals', []) or []
+                _evidence_type_display = _signals[0].get('evidence_type', 'N/A') if _signals else _sanitized.get('evidence_type', 'N/A')
+                _sig_count = sub.get('signal_count', len(_signals))
+                _sub_status = sub.get('submission_status', _sanitized.get('status', 'submitted'))
+                _status_icon = '✅ 成功' if sub.get('success') else '❌ 失败'
+                if _sub_status == 'abstained':
+                    _status_icon = '⚪ 弃权'
+                
                 self.submissions_tree.insert(
                     "",
                     tk.END,
@@ -827,9 +851,9 @@ class AgentOracleGUI:
                         sub.get('id', ''),
                         timestamp,
                         sub.get('task_title', '')[:40],
-                        '✅ 成功' if sub.get('success') else '❌ 失败',
+                        _status_icon,
                         '✅ 是' if sub.get('data_sanitized') else '⚠️ 否',
-                        f"{sub.get('sanitized_prediction', {}).get('probability', sub.get('sanitized_prediction', {}).get('confidence', 0)):.2f}"
+                        f"{_evidence_type_display} (×{_sig_count})"
                     ),
                     tags=(str(sub.get('id', '')),)
                 )
@@ -883,11 +907,20 @@ class AgentOracleGUI:
             info_text = scrolledtext.ScrolledText(info_frame, wrap=tk.WORD, font=self.mono_font)
             info_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
             
+            original_sub = submission.get('original_submission', {}) or {}
+            sanitized_sub = submission.get('sanitized_submission', {}) or {}
+            proto_ver = submission.get('protocol_version', sanitized_sub.get('protocol_version', '3.0'))
+            sub_status = submission.get('submission_status', sanitized_sub.get('status', 'submitted'))
+            sig_count = submission.get('signal_count', len(sanitized_sub.get('signals', []) or []))
+            
             info_content = f"""记录 ID: {submission.get('id')}
 时间: {submission.get('timestamp')}
 任务 ID: {submission.get('task_id')}
 任务标题: {submission.get('task_title')}
 提交状态: {'✅ 成功' if submission.get('success') else '❌ 失败'}
+协议版本: UAP v{proto_ver}
+Submission Status: {sub_status}
+信号数量: {sig_count}
 数据脱敏: {'✅ 是' if submission.get('data_sanitized') else '⚠️ 否'}
 
 问题:
@@ -898,78 +931,89 @@ class AgentOracleGUI:
             info_text.insert(1.0, info_content)
             info_text.config(state=tk.DISABLED)
             
-            # 原始预测选项卡
+            # ====== UAP v3.0 payload 格式化展示辅助 ======
+            import json as _json
+            def _format_uap_payload(payload: dict, title: str) -> str:
+                if not payload:
+                    return f"=== {title} ===\n(空)\n"
+                lines = [f"=== {title} (UAP v{payload.get('protocol_version', '3.0')}) ==="]
+                lines.append(f"task_id:          {payload.get('task_id', 'N/A')}")
+                lines.append(f"status:           {payload.get('status', 'N/A')}")
+                lines.append(f"privacy_cleared:  {payload.get('privacy_cleared', False)}")
+                lines.append(f"signal_count:     {len(payload.get('signals', []) or [])}")
+                if payload.get('user_persona'):
+                    lines.append(f"user_persona:     {_json.dumps(payload['user_persona'], ensure_ascii=False)}")
+                if payload.get('status') == 'abstained':
+                    lines.append(f"abstain_reason:   {payload.get('abstain_reason', 'N/A')}")
+                    lines.append(f"abstain_detail:   {payload.get('abstain_detail', 'N/A')}")
+                lines.append("")
+                lines.append("--- Signals ---")
+                for idx, sig in enumerate(payload.get('signals', []) or []):
+                    lines.append(f"\n[Signal {idx}] signal_id={sig.get('signal_id', 'N/A')}")
+                    lines.append(f"  evidence_type:       {sig.get('evidence_type', 'N/A')}")
+                    lines.append(f"  source_type:         {sig.get('source_type', 'N/A')}")
+                    lines.append(f"  data_exclusivity:    {sig.get('data_exclusivity', 'N/A')}")
+                    lines.append(f"  source_description:  {sig.get('source_description', 'N/A')}")
+                    lines.append(f"  observed_at:         {sig.get('observed_at', 'N/A')}")
+                    lines.append(f"  relevance_score:     {sig.get('relevance_score', 'N/A')}")
+                    lines.append(f"  source_urls:         {sig.get('source_urls', [])}")
+                    lines.append(f"  entity_tags:         {_json.dumps(sig.get('entity_tags', []), ensure_ascii=False)}")
+                    lines.append(f"  evidence_text:")
+                    for l in str(sig.get('evidence_text', '')).split('\n'):
+                        lines.append(f"    {l}")
+                    lines.append(f"  relevance_reasoning:")
+                    for l in str(sig.get('relevance_reasoning', '')).split('\n'):
+                        lines.append(f"    {l}")
+                lines.append("")
+                lines.append("--- Raw JSON ---")
+                lines.append(_json.dumps(payload, ensure_ascii=False, indent=2))
+                return "\n".join(lines)
+            
+            # 原始提交选项卡 —— 未脱敏的 UAP v3.0 payload
             original_frame = ttk.Frame(detail_notebook)
-            detail_notebook.add(original_frame, text="原始预测")
+            detail_notebook.add(original_frame, text="原始提交 (UAP v3.0)")
             
             original_text = scrolledtext.ScrolledText(original_frame, wrap=tk.WORD, font=self.mono_font)
             original_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            
-            original_pred = submission.get('original_prediction', {})
-            original_content = f"""概率: {original_pred.get('probability', original_pred.get('confidence', 0)):.2f}
-
-理由:
-{original_pred.get('rationale', original_pred.get('prediction', 'N/A'))}
-
-证据类型: {original_pred.get('evidence_type', 'N/A')}
-
-完整推理:
-{original_pred.get('reasoning', original_pred.get('prediction', 'N/A'))}
-"""
-            original_text.insert(1.0, original_content)
+            original_text.insert(1.0, _format_uap_payload(original_sub, "原始提交（脱敏前）"))
             original_text.config(state=tk.DISABLED)
             
-            # 脱敏预测选项卡
+            # 脱敏提交选项卡 —— 实际发送给平台的 UAP v3.0 payload
             sanitized_frame = ttk.Frame(detail_notebook)
-            detail_notebook.add(sanitized_frame, text="脱敏预测")
+            detail_notebook.add(sanitized_frame, text="实际提交 (UAP v3.0)")
             
             sanitized_text = scrolledtext.ScrolledText(sanitized_frame, wrap=tk.WORD, font=self.mono_font)
             sanitized_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            
-            sanitized_pred = submission.get('sanitized_prediction', {})
-            sanitized_content = f"""概率: {sanitized_pred.get('probability', sanitized_pred.get('confidence', 0)):.2f}
-
-理由:
-{sanitized_pred.get('rationale', sanitized_pred.get('prediction', 'N/A'))}
-
-证据类型: {sanitized_pred.get('evidence_type', 'N/A')}
-
-完整推理:
-{sanitized_pred.get('reasoning', sanitized_pred.get('prediction', 'N/A'))}
-"""
-            sanitized_text.insert(1.0, sanitized_content)
+            sanitized_text.insert(1.0, _format_uap_payload(sanitized_sub, "实际提交（脱敏后）"))
             sanitized_text.config(state=tk.DISABLED)
             
-            # 对比选项卡
+            # 对比选项卡 —— 每条信号的 evidence_text / relevance_reasoning 对比
             compare_frame = ttk.Frame(detail_notebook)
             detail_notebook.add(compare_frame, text="对比")
             
             compare_text = scrolledtext.ScrolledText(compare_frame, wrap=tk.WORD, font=self.mono_font)
             compare_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
             
-            compare_content = f"""=== 概率对比 ===
-原始: {original_pred.get('probability', original_pred.get('confidence', 0)):.2f}
-脱敏: {sanitized_pred.get('probability', sanitized_pred.get('confidence', 0)):.2f}
-
-=== 理由对比 ===
-
-原始理由:
-{original_pred.get('rationale', original_pred.get('prediction', 'N/A'))}
-
-脱敏理由:
-{sanitized_pred.get('rationale', sanitized_pred.get('prediction', 'N/A'))}
-
-{'✅ 数据已脱敏' if submission.get('data_sanitized') else '⚠️ 数据未脱敏'}
-
-=== 完整推理对比 ===
-
-原始推理:
-{original_pred.get('reasoning', original_pred.get('prediction', 'N/A'))}
-
-脱敏推理:
-{sanitized_pred.get('reasoning', sanitized_pred.get('prediction', 'N/A'))}
-"""
-            compare_text.insert(1.0, compare_content)
+            orig_signals = original_sub.get('signals', []) or []
+            san_signals = sanitized_sub.get('signals', []) or []
+            compare_lines = [f"{'✅ 数据已脱敏' if submission.get('data_sanitized') else '⚠️ 数据未脱敏'}"]
+            compare_lines.append(f"原始信号数: {len(orig_signals)} | 脱敏信号数: {len(san_signals)}")
+            compare_lines.append("")
+            for i in range(max(len(orig_signals), len(san_signals))):
+                o = orig_signals[i] if i < len(orig_signals) else {}
+                s = san_signals[i] if i < len(san_signals) else {}
+                compare_lines.append(f"========== Signal [{i}] ==========")
+                compare_lines.append(f"\n--- evidence_text ---")
+                compare_lines.append(f"[原始] {o.get('evidence_text', '(无)')}")
+                compare_lines.append(f"[脱敏] {s.get('evidence_text', '(无)')}")
+                compare_lines.append(f"\n--- relevance_reasoning ---")
+                compare_lines.append(f"[原始] {o.get('relevance_reasoning', '(无)')}")
+                compare_lines.append(f"[脱敏] {s.get('relevance_reasoning', '(无)')}")
+                compare_lines.append(f"\n--- source_description ---")
+                compare_lines.append(f"[原始] {o.get('source_description', '(无)')}")
+                compare_lines.append(f"[脱敏] {s.get('source_description', '(无)')}")
+                compare_lines.append("")
+            compare_text.insert(1.0, "\n".join(compare_lines))
             compare_text.config(state=tk.DISABLED)
             
         except Exception as e:
@@ -1005,6 +1049,631 @@ class AgentOracleGUI:
         except Exception as e:
             messagebox.showerror("错误", f"清空记录失败: {e}")
     
+    # ════════════════════════════════════════════════════════════════════
+    # 仿真 Tab
+    # ════════════════════════════════════════════════════════════════════
+
+    def _get_config_val(self, key: str, default: str = '') -> str:
+        """从已加载配置中读取值"""
+        try:
+            return str(self.original_config.get(key, default))
+        except Exception:
+            return default
+
+    def _create_sim_tab(self, parent):
+        """构建仿真 Tab 内容"""
+        # ── 参数设置 ────────────────────────────────────────────────────
+        params_frame = ttk.LabelFrame(parent, text="仿真参数", padding=8)
+        params_frame.pack(fill=tk.X, padx=8, pady=8)
+
+        # 平台地址
+        row = ttk.Frame(params_frame)
+        row.pack(fill=tk.X, pady=2)
+        ttk.Label(row, text="平台地址:", width=12, font=self.default_font).pack(side=tk.LEFT)
+        self._sim_url_var = tk.StringVar(value=self._get_config_val('base_url', 'http://localhost:3000'))
+        ttk.Entry(row, textvariable=self._sim_url_var, font=self.mono_font).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # API Keys
+        keys_lf = ttk.LabelFrame(params_frame,
+            text="API Keys（每行一个；填单个 Key 时由「Agent 数量」决定并发数）", padding=4)
+        keys_lf.pack(fill=tk.X, pady=4)
+        self._sim_keys_text = scrolledtext.ScrolledText(
+            keys_lf, height=4, font=self.mono_font, wrap=tk.NONE)
+        self._sim_keys_text.pack(fill=tk.X)
+        # 预填当前配置的 api_key
+        prefill_key = self._get_config_val('api_key')
+        if prefill_key:
+            self._sim_keys_text.insert('1.0', prefill_key)
+
+        # 任务 ID
+        row = ttk.Frame(params_frame)
+        row.pack(fill=tk.X, pady=2)
+        ttk.Label(row, text="任务 ID:", width=12, font=self.default_font).pack(side=tk.LEFT)
+        self._sim_task_id_var = tk.StringVar()
+        ttk.Entry(row, textvariable=self._sim_task_id_var,
+                  font=self.mono_font, foreground='#555').pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(row, text="（空=自动获取）", font=self.default_font).pack(side=tk.LEFT, padx=4)
+
+        # Agent 数量 + 延迟
+        row = ttk.Frame(params_frame)
+        row.pack(fill=tk.X, pady=2)
+        ttk.Label(row, text="Signal 数量:", width=12, font=self.default_font).pack(side=tk.LEFT)
+        self._sim_count_var = tk.IntVar(value=5)
+        ttk.Spinbox(row, from_=1, to=200, textvariable=self._sim_count_var,
+                    width=6, font=self.default_font).pack(side=tk.LEFT)
+        ttk.Label(row, text="  启动延迟:", font=self.default_font).pack(side=tk.LEFT, padx=(20, 0))
+        self._sim_delay_var = tk.DoubleVar(value=0.0)
+        ttk.Spinbox(row, from_=0.0, to=10.0, increment=0.5,
+                    textvariable=self._sim_delay_var, width=6,
+                    format="%.1f", font=self.default_font).pack(side=tk.LEFT)
+        ttk.Label(row, text="秒（随机上限）", font=self.default_font).pack(side=tk.LEFT, padx=4)
+
+        # 清除历史数据
+        row = ttk.Frame(params_frame)
+        row.pack(fill=tk.X, pady=2)
+        self._sim_clear_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(row,
+            text="提交前清除该任务历史数据（调用 /api/test/prepare，需指定任务 ID）",
+            variable=self._sim_clear_var).pack(side=tk.LEFT)
+
+        # ── 控制按钮 ──────────────────────────────────────────────────
+        ctrl_frame = ttk.Frame(parent)
+        ctrl_frame.pack(fill=tk.X, padx=8, pady=4)
+        self._sim_start_btn = ttk.Button(
+            ctrl_frame, text="▶  启动仿真", command=self._start_simulation)
+        self._sim_start_btn.pack(side=tk.LEFT, padx=4)
+        self._sim_stop_btn = ttk.Button(
+            ctrl_frame, text="⏹  停止", command=self._stop_simulation,
+            state=tk.DISABLED)
+        self._sim_stop_btn.pack(side=tk.LEFT, padx=4)
+        ttk.Button(
+            ctrl_frame, text="清空日志",
+            command=lambda: (self._sim_log.config(state=tk.NORMAL),
+                             self._sim_log.delete('1.0', tk.END),
+                             self._sim_log.config(state=tk.DISABLED))
+        ).pack(side=tk.LEFT, padx=4)
+
+        # 保存 / 加载仿真配置
+        ttk.Separator(ctrl_frame, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, fill=tk.Y, padx=8, pady=2)
+        ttk.Button(
+            ctrl_frame, text="💾 保存配置", command=self._save_sim_config
+        ).pack(side=tk.LEFT, padx=4)
+        ttk.Button(
+            ctrl_frame, text="📂 加载配置", command=self._load_sim_config
+        ).pack(side=tk.LEFT, padx=4)
+
+        # 启动时自动加载上次保存的仿真配置
+        self._load_sim_config(silent=True)
+
+        # ── 进度条 + 统计 ──────────────────────────────────────────────
+        prog_frame = ttk.Frame(parent)
+        prog_frame.pack(fill=tk.X, padx=8, pady=(0, 2))
+        self._sim_progress = ttk.Progressbar(prog_frame, mode='determinate')
+        self._sim_progress.pack(fill=tk.X, pady=2)
+        self._sim_stats_label = ttk.Label(
+            prog_frame, text="就绪", font=self.default_font)
+        self._sim_stats_label.pack(anchor=tk.W)
+
+        # ── 日志 ──────────────────────────────────────────────────────
+        log_lf = ttk.LabelFrame(parent, text="仿真日志", padding=4)
+        log_lf.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        self._sim_log = scrolledtext.ScrolledText(
+            log_lf, font=self.mono_font, height=12, state=tk.DISABLED)
+        self._sim_log.pack(fill=tk.BOTH, expand=True)
+        self._sim_log.tag_config("success", foreground="#1a7a1a")
+        self._sim_log.tag_config("error",   foreground="#cc0000")
+        self._sim_log.tag_config("warning", foreground="#cc6600")
+        self._sim_log.tag_config("info",    foreground="#333333")
+
+    # ══════════════════════════════════════════════════════════════
+    # 仿真配置持久化
+    # ══════════════════════════════════════════════════════════════
+    _SIM_CONFIG_FILE = 'sim_config.json'
+
+    def _get_sim_config_path(self) -> Path:
+        """仿真配置文件路径（与 config.json 同目录）"""
+        return Path(os.path.dirname(os.path.abspath(__file__))).parent / self._SIM_CONFIG_FILE
+
+    def _save_sim_config(self):
+        """将当前仿真参数保存到 sim_config.json"""
+        keys_raw = self._sim_keys_text.get('1.0', tk.END).strip()
+        cfg = {
+            'base_url':   self._sim_url_var.get().strip(),
+            'api_keys':   keys_raw,
+            'task_id':    self._sim_task_id_var.get().strip(),
+            'agent_count': self._sim_count_var.get(),
+            'delay':      self._sim_delay_var.get(),
+            'clear_first': self._sim_clear_var.get(),
+        }
+        path = self._get_sim_config_path()
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+            self._add_sim_log(f"💾 仿真配置已保存 → {path.name}", "success")
+        except Exception as e:
+            self._add_sim_log(f"❌ 保存配置失败: {e}", "error")
+            messagebox.showerror("保存失败", str(e))
+
+    def _load_sim_config(self, silent: bool = False):
+        """从 sim_config.json 加载仿真参数
+        
+        Args:
+            silent: True 时静默加载（启动时自动调用），文件不存在不提示
+        """
+        path = self._get_sim_config_path()
+        if not path.exists():
+            if not silent:
+                messagebox.showinfo("提示", f"配置文件不存在: {path.name}")
+            return
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            # 恢复各字段
+            if 'base_url' in cfg:
+                self._sim_url_var.set(cfg['base_url'])
+            if 'api_keys' in cfg:
+                self._sim_keys_text.delete('1.0', tk.END)
+                self._sim_keys_text.insert('1.0', cfg['api_keys'])
+            if 'task_id' in cfg:
+                self._sim_task_id_var.set(cfg['task_id'])
+            if 'agent_count' in cfg:
+                self._sim_count_var.set(int(cfg['agent_count']))
+            if 'delay' in cfg:
+                self._sim_delay_var.set(float(cfg['delay']))
+            if 'clear_first' in cfg:
+                self._sim_clear_var.set(bool(cfg['clear_first']))
+            if not silent:
+                self._add_sim_log(f"📂 仿真配置已加载 ← {path.name}", "success")
+        except Exception as e:
+            if not silent:
+                self._add_sim_log(f"❌ 加载配置失败: {e}", "error")
+                messagebox.showerror("加载失败", str(e))
+
+    def _add_sim_log(self, msg: str, level: str = 'info'):
+        """线程安全地向仿真日志追加一行"""
+        def _update():
+            self._sim_log.config(state=tk.NORMAL)
+            ts = datetime.now().strftime('%H:%M:%S')
+            self._sim_log.insert(tk.END, f"[{ts}] {msg}\n", level)
+            self._sim_log.see(tk.END)
+            self._sim_log.config(state=tk.DISABLED)
+        self.root.after(0, _update)
+
+    def _start_simulation(self):
+        """读取参数并启动仿真后台线程"""
+        if self._sim_running:
+            return
+
+        url       = self._sim_url_var.get().strip()
+        keys_raw  = self._sim_keys_text.get('1.0', tk.END).strip()
+        task_id   = self._sim_task_id_var.get().strip()
+        count     = self._sim_count_var.get()
+        delay     = self._sim_delay_var.get()
+        clear_first = self._sim_clear_var.get()
+
+        if not url:
+            messagebox.showerror("参数错误", "请填写平台地址")
+            return
+
+        # 解析 API Keys（换行或逗号分隔）
+        api_keys = [k.strip()
+                    for k in keys_raw.replace(',', '\n').splitlines()
+                    if k.strip()]
+        if not api_keys:
+            messagebox.showerror("参数错误", "请至少填写一个 API Key")
+            return
+
+        # 单 Key 模式：重复 count 次
+        if len(api_keys) == 1:
+            api_keys = api_keys * count
+
+        self._sim_running = True
+        self._sim_abort.clear()
+        self._sim_start_btn.config(state=tk.DISABLED)
+        self._sim_stop_btn.config(state=tk.NORMAL)
+        self._sim_progress.config(maximum=len(api_keys), value=0)
+        self._sim_stats_label.config(text=f"准备中... Agent 总数: {len(api_keys)}")
+
+        threading.Thread(
+            target=self._sim_worker,
+            args=(url, api_keys, task_id or None, delay, clear_first),
+            daemon=True
+        ).start()
+
+    def _stop_simulation(self):
+        """请求停止仿真"""
+        self._sim_abort.set()
+        self._add_sim_log("⏹ 用户请求停止，等待当前请求完成...", "warning")
+
+    def _sim_build_signal(self, task: dict, agent_index: int) -> dict:
+        """构建单条模拟信号 payload（UAP v3.0）
+        数据池参考 /api/test/prepare 的 AGENT_TEMPLATES，覆盖金融/科技/政府/学术/能源/军事/医疗/地产等领域。
+        """
+        # ── 40 种专业画像（对标 prepare/route.ts 的 AGENT_TEMPLATES）──
+        _PERSONAS = [
+            # 金融类（12）
+            {"gender": "male",   "age_range": "35-45", "occupation": "宏观分析师",     "region": "north_america", "interests": ["宏观经济", "债券"],       "expertise": "macro_economics",   "stance": "hawkish",  "info_sources": ["彭博", "路透社"]},
+            {"gender": "female", "age_range": "32-42", "occupation": "外汇交易员",     "region": "europe",        "interests": ["外汇", "衍生品"],       "expertise": "quantitative",      "stance": "neutral",  "info_sources": ["彭博外汇", "BIS报告"]},
+            {"gender": "male",   "age_range": "30-40", "occupation": "固收策略师",     "region": "north_america", "interests": ["固收", "利率"],         "expertise": "fixed_income",      "stance": "dovish",   "info_sources": ["CME", "美联储公告"]},
+            {"gender": "male",   "age_range": "50-60", "occupation": "价值投资人",     "region": "north_america", "interests": ["价值投资", "分红"],     "expertise": "value_investing",   "stance": "dovish",   "info_sources": ["伯克希尔", "巴菲特"]},
+            {"gender": "male",   "age_range": "29-39", "occupation": "成长股分析师",   "region": "north_america", "interests": ["成长股", "科技股"],     "expertise": "quantitative",      "stance": "bullish",  "info_sources": ["高盛研报", "摩根士丹利"]},
+            {"gender": "female", "age_range": "26-36", "occupation": "量化研究员",     "region": "north_america", "interests": ["量化策略", "因子投资"], "expertise": "quantitative",      "stance": "neutral",  "info_sources": ["Journal of Finance", "SSRN"]},
+            {"gender": "male",   "age_range": "38-48", "occupation": "信用分析师",     "region": "north_america", "interests": ["信用市场", "高收益债"], "expertise": "fixed_income",      "stance": "hawkish",  "info_sources": ["穆迪", "标普"]},
+            {"gender": "female", "age_range": "34-44", "occupation": "亚洲债券分析师", "region": "east_asia",     "interests": ["亚洲债市", "信用评级"], "expertise": "fixed_income",      "stance": "hawkish",  "info_sources": ["惠誉亚太", "联合资信"]},
+            {"gender": "male",   "age_range": "32-42", "occupation": "新兴市场分析师", "region": "south_asia",    "interests": ["印度股市", "新兴市场"], "expertise": "emerging_markets",  "stance": "bullish",  "info_sources": ["经济时报", "BSE数据"]},
+            {"gender": "male",   "age_range": "40-50", "occupation": "大宗商品交易员", "region": "latin_america", "interests": ["巴西市场", "大宗商品"], "expertise": "emerging_markets",  "stance": "hawkish",  "info_sources": ["Valor Econômico", "Bovespa"]},
+            {"gender": "female", "age_range": "35-45", "occupation": "澳洲宏观分析师", "region": "oceania",       "interests": ["澳元", "大宗商品出口"], "expertise": "macro_economics",   "stance": "neutral",  "info_sources": ["RBA", "ASX数据"]},
+            {"gender": "male",   "age_range": "47-57", "occupation": "日本利率策略师", "region": "east_asia",     "interests": ["负利率", "日本化"],     "expertise": "monetary_policy",   "stance": "dovish",   "info_sources": ["日银季报", "大和研究"]},
+            # 科技类（5）
+            {"gender": "female", "age_range": "28-35", "occupation": "AI研究员",       "region": "east_asia",     "interests": ["AI", "科技股"],         "expertise": "technology",        "stance": "dovish",   "info_sources": ["财新", "科技媒体"]},
+            {"gender": "male",   "age_range": "25-35", "occupation": "区块链开发者",   "region": "east_asia",     "interests": ["区块链", "Web3"],       "expertise": "technology",        "stance": "neutral",  "info_sources": ["CoinDesk", "链上数据"]},
+            {"gender": "male",   "age_range": "30-40", "occupation": "半导体分析师",   "region": "east_asia",     "interests": ["半导体", "科技供应链"], "expertise": "technology",        "stance": "hawkish",  "info_sources": ["IC Insights", "SEMI"]},
+            {"gender": "female", "age_range": "24-34", "occupation": "云计算分析师",   "region": "north_america", "interests": ["云计算", "SaaS"],       "expertise": "technology",        "stance": "bullish",  "info_sources": ["TechCrunch", "a16z"]},
+            {"gender": "male",   "age_range": "28-38", "occupation": "NLP工程师",      "region": "north_america", "interests": ["机器学习", "NLP"],     "expertise": "ai_finance",        "stance": "neutral",  "info_sources": ["OpenAI博客", "Google Research"]},
+            # 政府/地缘类（5）
+            {"gender": "male",   "age_range": "45-55", "occupation": "地缘政治顾问",   "region": "europe",        "interests": ["地缘政治", "能源"],     "expertise": "geopolitics",       "stance": "hawkish",  "info_sources": ["FT", "Economist"]},
+            {"gender": "female", "age_range": "40-50", "occupation": "贸易政策研究员", "region": "north_america", "interests": ["国际贸易", "制裁政策"], "expertise": "geopolitics",       "stance": "hawkish",  "info_sources": ["USTR", "WTO"]},
+            {"gender": "male",   "age_range": "50-60", "occupation": "央行政策分析师", "region": "east_asia",     "interests": ["央行政策", "汇率管理"], "expertise": "monetary_policy",   "stance": "neutral",  "info_sources": ["央行公告", "BIS"]},
+            {"gender": "male",   "age_range": "42-52", "occupation": "产业政策研究员", "region": "east_asia",     "interests": ["半导体政策", "产业补贴"], "expertise": "geopolitics",     "stance": "hawkish",  "info_sources": ["METI", "工信部"]},
+            {"gender": "female", "age_range": "48-58", "occupation": "财政政策分析师", "region": "europe",        "interests": ["财政政策", "债务"],     "expertise": "fiscal_policy",     "stance": "dovish",   "info_sources": ["欧央行", "财政部"]},
+            # 学术类（4）
+            {"gender": "female", "age_range": "38-48", "occupation": "行为经济学教授", "region": "north_america", "interests": ["行为经济学", "市场"],   "expertise": "behavioral",        "stance": "neutral",  "info_sources": ["学术期刊", "NBER"]},
+            {"gender": "male",   "age_range": "42-52", "occupation": "国际金融教授",   "region": "europe",        "interests": ["国际金融", "资本流动"], "expertise": "macro_economics",   "stance": "neutral",  "info_sources": ["NBER", "CEPR"]},
+            {"gender": "female", "age_range": "30-40", "occupation": "气候经济学家",   "region": "europe",        "interests": ["气候经济学", "转型风险"], "expertise": "esg",             "stance": "dovish",   "info_sources": ["Nature Climate", "IPCC"]},
+            {"gender": "male",   "age_range": "55-65", "occupation": "货币理论学者",   "region": "north_america", "interests": ["货币理论", "经济史"],   "expertise": "monetary_policy",   "stance": "neutral",  "info_sources": ["学术期刊", "Fed论文"]},
+            # 能源/大宗商品类（4）
+            {"gender": "male",   "age_range": "40-50", "occupation": "原油分析师",     "region": "middle_east",   "interests": ["原油", "OPEC"],         "expertise": "commodities",       "stance": "hawkish",  "info_sources": ["OPEC报告", "EIA数据"]},
+            {"gender": "female", "age_range": "32-42", "occupation": "可再生能源顾问", "region": "europe",        "interests": ["可再生能源", "碳交易"], "expertise": "esg",               "stance": "dovish",   "info_sources": ["Bloomberg绿能", "IRENA"]},
+            {"gender": "male",   "age_range": "45-55", "occupation": "矿业投资人",     "region": "latin_america", "interests": ["金属", "矿业"],         "expertise": "commodities",       "stance": "hawkish",  "info_sources": ["金属通报", "LME"]},
+            {"gender": "male",   "age_range": "38-48", "occupation": "主权财富分析师", "region": "middle_east",   "interests": ["主权财富", "石油美元"], "expertise": "commodities",       "stance": "hawkish",  "info_sources": ["Zawya", "Gulf News"]},
+            # 军事/安全类（2）
+            {"gender": "male",   "age_range": "50-60", "occupation": "防务战略顾问",   "region": "east_asia",     "interests": ["台海局势", "印太战略"], "expertise": "geopolitics",       "stance": "hawkish",  "info_sources": ["RAND", "CSIS"]},
+            {"gender": "female", "age_range": "40-50", "occupation": "网络安全分析师", "region": "europe",        "interests": ["网络安全", "关键基础设施"], "expertise": "geopolitics",  "stance": "hawkish",  "info_sources": ["NATO报告", "Cyber Ventures"]},
+            # 记者/咨询/医疗/地产（5）
+            {"gender": "female", "age_range": "30-40", "occupation": "财经记者",       "region": "east_asia",     "interests": ["宏观叙事", "政策解读"], "expertise": "macro_economics",   "stance": "neutral",  "info_sources": ["财联社", "证券时报"]},
+            {"gender": "female", "age_range": "42-52", "occupation": "ESG咨询师",      "region": "europe",        "interests": ["ESG评级", "可持续报告"], "expertise": "esg",             "stance": "dovish",   "info_sources": ["MSCI ESG", "SASB"]},
+            {"gender": "female", "age_range": "38-48", "occupation": "生物科技分析师", "region": "north_america", "interests": ["医药股", "生物科技"],   "expertise": "technology",        "stance": "bullish",  "info_sources": ["NEJM", "BioPharma"]},
+            {"gender": "male",   "age_range": "42-52", "occupation": "商业地产分析师", "region": "north_america", "interests": ["商业地产", "REITs"],   "expertise": "real_estate",       "stance": "dovish",   "info_sources": ["CoStar", "房地产周刊"]},
+            {"gender": "male",   "age_range": "32-42", "occupation": "创业投资人",     "region": "east_asia",     "interests": ["创投", "量化"],         "expertise": "quantitative",      "stance": "neutral",  "info_sources": ["社交媒体", "量化信号"]},
+        ]
+
+        # ── 20 种证据模板（含专业视角前缀）──
+        _TEMPLATES = [
+            "从宏观经济数据来看，{angle}。近期关键指标（PMI、CPI、就业）均指向这一方向。",
+            "基于央行政策分析，{angle}。利率路径和前瞻指引暗示这一趋势将持续。",
+            "从信用市场信号观察，{angle}。信用利差和违约率变化支持此判断。",
+            "结合地缘政治风险评估，{angle}。区域紧张局势与供应链扰动是核心驱动因素。",
+            "根据量化因子模型回测，{angle}。动量、价值、波动率因子均发出一致信号。",
+            "从技术产业链调研得知，{angle}。上下游库存和订单数据验证了这一趋势。",
+            "基于大宗商品供需分析，{angle}。库存周期和产能利用率是关键变量。",
+            "从行为金融学角度分析，{angle}。投资者情绪指标和资金流向数据佐证此观点。",
+            "结合ESG和气候政策评估，{angle}。碳定价机制和转型投资正在重塑资产定价。",
+            "根据卫星和替代数据分析，{angle}。物流流量、工业排放等实时指标提供了独立验证。",
+            "从货币政策传导机制来看，{angle}。利率-汇率-资产价格链条正在发挥作用。",
+            "基于历史周期类比研究，{angle}。当前阶段与此前特定经济周期高度相似。",
+            "从跨资产相关性矩阵观察，{angle}。股债汇商相关性结构正在经历显著变化。",
+            "结合全球资本流动追踪，{angle}。新兴市场和发达市场的资金再配置趋势明显。",
+            "根据企业财报季数据汇总，{angle}。盈利修正比率和指引变化揭示了微观基本面走向。",
+            "从监管政策变化推演，{angle}。新规实施路径和合规成本将影响市场结构。",
+            "基于债务周期和杠杆率分析，{angle}。信贷脉冲和偿债压力是前瞻性指标。",
+            "从劳动力市场微观结构分析，{angle}。工资增速和职位空缺率是通胀的领先指标。",
+            "结合期权市场隐含波动率和偏度，{angle}。尾部风险定价反映了市场的真实预期。",
+            "根据供应链压力指数和航运数据，{angle}。全球贸易物流的实时信号验证了此判断。",
+        ]
+
+        # ── 15 种分析角度 ──
+        _ANGLES = [
+            "当前形势更倾向于肯定方向演进，概率约65%-75%",
+            "不确定性因素较多，结果难以定论，需要更多数据确认",
+            "短期内可能出现反转，但中期趋势未改",
+            "长期趋势明显向好，短期波动不改变大方向",
+            "外部环境的变化将是关键影响因子，需密切关注",
+            "技术和政策双重驱动下，正向结果概率显著提升",
+            "多方力量正在博弈，均衡点尚未确立",
+            "风险溢价正在重新定价，资产配置需调整",
+            "周期性因素和结构性因素叠加，使判断更加复杂",
+            "关键变量的边际变化正在加速，拐点可能临近",
+            "历史相似场景下该方向的胜率约为70%以上",
+            "尽管存在逆风因素，基线情景仍偏正面",
+            "尾部风险不容忽视，需要对冲方案",
+            "供需两端的非对称信息使预测难度上升",
+            "制度性变革正在进行，传统分析框架需要修正",
+        ]
+
+        # ── 因果实体标签池 ──
+        _ENTITY_POOLS = {
+            "macro_economics":   [("美联储利率决议", "cause"), ("CPI通胀率", "indicator"), ("GDP增速", "indicator"), ("失业率", "indicator"), ("PMI制造业", "indicator")],
+            "fixed_income":      [("国债收益率曲线", "cause"), ("信用利差", "indicator"), ("久期风险", "cause"), ("违约率", "indicator"), ("回购市场流动性", "indicator")],
+            "technology":        [("AI算力扩张", "cause"), ("半导体周期", "indicator"), ("云支出增速", "indicator"), ("科技股估值", "indicator"), ("技术扩散速度", "cause")],
+            "geopolitics":       [("地缘紧张升级", "cause"), ("制裁政策", "cause"), ("供应链重构", "indicator"), ("能源安全", "cause"), ("军备竞赛", "indicator")],
+            "commodities":       [("OPEC产量政策", "cause"), ("原油库存", "indicator"), ("金属需求周期", "indicator"), ("农产品气候影响", "cause"), ("能源转型", "cause")],
+            "esg":               [("碳排放政策", "cause"), ("ESG资金流入", "indicator"), ("气候立法", "cause"), ("绿色溢价", "indicator"), ("转型风险", "indicator")],
+            "monetary_policy":   [("央行资产负债表", "cause"), ("量化宽松/紧缩", "cause"), ("通胀预期", "indicator"), ("实际利率", "indicator"), ("前瞻指引", "cause")],
+            "quantitative":      [("动量因子", "indicator"), ("波动率聚集", "indicator"), ("流动性冲击", "cause"), ("相关性突变", "indicator"), ("风险平价再平衡", "cause")],
+            "behavioral":        [("投资者情绪指标", "indicator"), ("恐慌指数VIX", "indicator"), ("羊群效应", "cause"), ("锚定偏差", "cause"), ("过度自信", "indicator")],
+            "emerging_markets":  [("新兴市场资本流出", "cause"), ("美元强势", "cause"), ("人口红利", "indicator"), ("汇率波动", "indicator"), ("政治风险溢价", "cause")],
+            "value_investing":   [("PE估值分位", "indicator"), ("自由现金流", "indicator"), ("股息率", "indicator"), ("ROE趋势", "indicator"), ("护城河评估", "cause")],
+            "real_estate":       [("房价指数", "indicator"), ("利率敏感性", "cause"), ("空置率", "indicator"), ("REITs折价", "indicator"), ("信贷条件", "cause")],
+            "fiscal_policy":     [("财政赤字率", "indicator"), ("政府债务/GDP", "indicator"), ("财政刺激规模", "cause"), ("税收政策变化", "cause"), ("公共投资", "cause")],
+            "ai_finance":        [("LLM技术突破", "cause"), ("AI应用渗透率", "indicator"), ("算力成本下降", "cause"), ("监管AI立法", "cause"), ("AI投资热潮", "indicator")],
+        }
+
+        persona = _PERSONAS[agent_index % len(_PERSONAS)]
+        expertise = persona.get("expertise", "macro_economics")
+        stance = persona.get("stance", "neutral")
+        info_sources = persona.get("info_sources", [])
+
+        base_evidence = random.choice(_TEMPLATES).format(angle=random.choice(_ANGLES))
+        # 附加唯一后缀，避免后端 public 去重把相同模板文本折叠
+        unique_suffix = f"（{persona['occupation']}·{random.choice(info_sources) if info_sources else '综合'}" \
+                        f"·{agent_index}-{random.randint(10000,99999)}）"
+        evidence = base_evidence + unique_suffix
+
+        task_id = task.get("task_id") or task.get("id")
+        sig_id  = f"sim_{str(task_id)[:8]}_{int(time.time()*1000) % 1000000}_{agent_index}_{random.randint(0,9999)}"
+
+        # 生成 1~3 个因果实体标签
+        entity_pool = _ENTITY_POOLS.get(expertise, _ENTITY_POOLS["macro_economics"])
+        n_tags = random.randint(1, min(3, len(entity_pool)))
+        chosen_tags = random.sample(entity_pool, n_tags)
+        entity_tags = [{"text": t[0], "role": t[1]} for t in chosen_tags]
+
+        # 基于 stance 微调 relevance_score 范围
+        if stance in ("hawkish", "bullish"):
+            rel_score = round(random.uniform(0.65, 0.95), 2)
+        elif stance in ("dovish",):
+            rel_score = round(random.uniform(0.55, 0.88), 2)
+        else:
+            rel_score = round(random.uniform(0.45, 0.85), 2)
+
+        # evidence_type 按 expertise 加权
+        if expertise in ("quantitative", "fixed_income", "commodities", "macro_economics"):
+            ev_type = random.choices(["hard_fact", "persona_inference"], weights=[0.7, 0.3])[0]
+        else:
+            ev_type = random.choices(["hard_fact", "persona_inference"], weights=[0.3, 0.7])[0]
+
+        # source_type 按 data_exclusivity 对应
+        excl = random.choices(
+            ["public", "semi_private", "private"],
+            weights=[0.5, 0.3, 0.2],
+        )[0]
+        source_map = {
+            "public":       ["llm_analysis", "web_search", "news_aggregator"],
+            "semi_private":  ["local_memory", "user_profile", "behavior_pattern"],
+            "private":       ["local_chat", "local_document", "local_transaction"],
+        }
+        src_type = random.choice(source_map[excl])
+
+        reasoning = (
+            f"基于{persona['occupation']}的{expertise}专业视角，"
+            f"结合{'、'.join(info_sources)}数据源，"
+            f"从{'、'.join(persona['interests'])}领域经验出发进行分析。"
+            f"立场倾向: {stance}。"
+        )
+
+        return {
+            "task_id": task_id,
+            "status": "submitted",
+            "privacy_cleared": True,
+            "protocol_version": "3.0",
+            "plugin_version": "gui-sim/1.0",
+            "model_name": "simulation",
+            "user_persona": {
+                "gender":     persona["gender"],
+                "age_range":  persona["age_range"],
+                "occupation": persona["occupation"],
+                "region":     persona["region"],
+                "interests":  persona["interests"],
+            },
+            "signals": [{
+                "signal_id":          sig_id,
+                "evidence_type":      ev_type,
+                "evidence_text":      evidence,
+                "relevance_score":    rel_score,
+                "relevance_reasoning": reasoning,
+                "source_type":        src_type,
+                "entity_tags":        entity_tags,
+                "source_urls":        [],
+                "data_exclusivity":   excl,
+            }],
+        }
+
+    def _sim_worker(self, url: str, api_keys: list, task_id_override,
+                    delay: float, clear_first: bool):
+        """仿真后台线程：清除数据 → 为每个 Agent 生成独立 UUID → 并发提交信号
+        
+        关键设计：不使用 AgentOracleClient（同一 API Key 会映射到同一 user_id，
+        导致所有提交归属 1 个 Agent）。改用 /api/test/sim-submit 端点，
+        直接指定 user_id，实现多 Agent 独立身份。
+        """
+        try:
+            self._sim_worker_inner(url, api_keys, task_id_override, delay, clear_first)
+        except Exception as e:
+            import traceback
+            self._add_sim_log(f"❌ 仿真线程异常崩溃: {e}", "error")
+            self._add_sim_log(traceback.format_exc()[:500], "error")
+            self.root.after(0, self._sim_on_done_reset)
+
+    def _sim_worker_inner(self, url: str, api_keys: list, task_id_override,
+                          delay: float, clear_first: bool):
+        """仿真核心逻辑（由 _sim_worker 包裹异常处理）"""
+        import requests as _http
+
+        agent_count = len(api_keys)
+        self._add_sim_log(f"🚀 并发仿真启动  Agent 数: {agent_count}", "info")
+        self._add_sim_log(f"   平台地址 : {url}")
+        self._add_sim_log(f"   目标任务 : {task_id_override or '(需指定任务 ID)'}")
+        self._add_sim_log(f"   提交端点 : /api/test/sim-submit")
+        if delay > 0:
+            self._add_sim_log(f"   启动延迟 : 0 ~ {delay:.1f}s")
+
+        if not task_id_override:
+            self._add_sim_log("❌ 仿真模式必须指定任务 ID", "error")
+            self.root.after(0, self._sim_on_done_reset)
+            return
+
+        # ── 调用 /api/test/prepare：获取 Agent 账号（+ 可选清除历史数据）──
+        if clear_first:
+            self._add_sim_log("📡 调用 /api/test/prepare（创建 Agent 账号 + 清除历史数据）...")
+            prepare_body = {"task_id": task_id_override}
+        else:
+            self._add_sim_log("📡 调用 /api/test/prepare（仅获取 Agent 账号，保留历史数据）...")
+            prepare_body = {}
+        try:
+            resp = _http.post(
+                f"{url}/api/test/prepare",
+                json=prepare_body,
+                timeout=60,
+            )
+            if resp.status_code != 200:
+                self._add_sim_log(f"  ❌ prepare 失败 HTTP {resp.status_code}: {resp.text[:200]}", "error")
+                self.root.after(0, self._sim_on_done_reset)
+                return
+            prepare_data = resp.json()
+            platform_agents = prepare_data.get("agents", [])
+            if clear_first:
+                self._add_sim_log(
+                    f"  🗑 已清除 {prepare_data.get('deletedSignals','?')} 条信号  "
+                    f"{prepare_data.get('deletedAnalyses','?')} 条分析", "success")
+            self._add_sim_log(
+                f"  ✅ 平台返回 {len(platform_agents)} 个 Agent 账号"
+                f" ({'复用已有' if prepare_data.get('reused') else '新创建'})", "success")
+        except Exception as e:
+            self._add_sim_log(f"  ❌ prepare 异常: {e}", "error")
+            self.root.after(0, self._sim_on_done_reset)
+            return
+
+        if not platform_agents:
+            self._add_sim_log("❌ 平台未返回任何 Agent 账号，无法继续", "error")
+            self.root.after(0, self._sim_on_done_reset)
+            return
+
+        # ── 从平台 Agent 中选取 agent_count 个 ─────────────────────────
+        selected = []
+        for i in range(agent_count):
+            pa = platform_agents[i % len(platform_agents)]
+            selected.append({
+                "index": i,
+                "user_id": pa["id"],
+                "username": pa.get("username", f"Agent-{i}"),
+            })
+        self._add_sim_log(
+            f"🆔 已选取 {agent_count} 个 Agent: "
+            f"{', '.join(a['username'] for a in selected[:5])}"
+            f"{'...' if agent_count > 5 else ''}")
+
+        # ── 并发提交 ──────────────────────────────────────────────────
+        t_start = time.time()
+        done = success_count = fail_count = 0
+        task_obj = {"task_id": task_id_override, "question": "[specified task]"}
+
+        def _run_agent(agent_info):
+            idx = agent_info["index"]
+            agent_id = agent_info["user_id"]
+            agent_name = agent_info.get("username", "")
+            if self._sim_abort.is_set():
+                return {"agent_index": idx, "status": "aborted",
+                        "elapsed_ms": 0, "task_id": None}
+            if delay > 0:
+                time.sleep(random.uniform(0, delay))
+            if self._sim_abort.is_set():
+                return {"agent_index": idx, "status": "aborted",
+                        "elapsed_ms": 0, "task_id": None}
+            t0 = time.time()
+            try:
+                payload = self._sim_build_signal(task_obj, idx)
+                # 使用 /api/test/sim-submit 端点，指定独立 user_id
+                # 错开 submitted_at 避免 UNIQUE(task_id, user_id, submitted_at) 冲突
+                from datetime import datetime as _dt, timedelta as _td
+                staggered_at = (_dt.utcnow() + _td(seconds=idx)).isoformat() + "Z"
+                submit_data = {
+                    "task_id":          task_id_override,
+                    "user_id":          agent_id,
+                    "signals":          payload.get("signals", []),
+                    "user_persona":     payload.get("user_persona"),
+                    "status":           "submitted",
+                    "submitted_at":     staggered_at,
+                    "plugin_version":   payload.get("plugin_version", "gui-sim/1.0"),
+                    "protocol_version": payload.get("protocol_version", "3.0"),
+                    "model_name":       payload.get("model_name", "simulation"),
+                }
+                resp = _http.post(
+                    f"{url}/api/test/sim-submit",
+                    json=submit_data,
+                    timeout=30,
+                )
+                ok = resp.status_code == 200
+                elapsed = int((time.time() - t0) * 1000)
+                if not ok:
+                    err_text = resp.text[:80] if resp.text else f"HTTP {resp.status_code}"
+                    return {"agent_index": idx, "status": "failed",
+                            "elapsed_ms": elapsed, "task_id": task_id_override,
+                            "error": err_text}
+                return {"agent_index": idx, "status": "success",
+                        "elapsed_ms": elapsed, "task_id": task_id_override,
+                        "username": agent_name}
+            except Exception as e:
+                return {"agent_index": idx, "status": "error",
+                        "elapsed_ms": int((time.time()-t0)*1000),
+                        "task_id": None, "error": str(e)[:80]}
+
+        max_workers = min(agent_count, 20)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_run_agent, a): a["index"]
+                for a in selected
+            }
+            for future in as_completed(futures):
+                r = future.result()
+                done += 1
+                if r["status"] == "success":
+                    success_count += 1
+                    icon, lvl = "✅", "success"
+                elif r["status"] in ("error", "failed", "auth_error"):
+                    fail_count += 1
+                    icon, lvl = "❌", "error"
+                elif r["status"] == "aborted":
+                    icon, lvl = "⏹", "warning"
+                else:
+                    icon, lvl = "⚠️", "warning"
+
+                line = (f"  {icon} Agent#{r['agent_index']:02d}"
+                        f"  {r.get('username', '')}"
+                        f"  {r['elapsed_ms']}ms  [{r['status']}]")
+                if r.get("error"):
+                    line += f"  {r['error']}"
+                self._add_sim_log(line, lvl)
+
+                _d, _s, _f = done, success_count, fail_count
+                _total = agent_count
+                def _upd(d=_d, s=_s, f=_f, tot=_total):
+                    self._sim_progress['value'] = d
+                    self._sim_stats_label.config(
+                        text=f"进度: {d}/{tot}  ✅ 成功: {s}  ❌ 失败: {f}")
+                self.root.after(0, _upd)
+
+        total_ms = (time.time() - t_start) * 1000
+        self._add_sim_log(
+            f"\n📊 汇总  成功: {success_count}  失败: {fail_count}"
+            f"  总耗时: {total_ms:.0f}ms", "info")
+        if success_count > 0:
+            avg = total_ms / success_count
+            self._add_sim_log(f"   平均响应: {avg:.0f}ms / 请求", "info")
+
+        _s, _f, _ms = success_count, fail_count, total_ms
+        def _done_upd(s=_s, f=_f, ms=_ms):
+            self._sim_stats_label.config(
+                text=f"✅ 仿真完成  成功: {s}  失败: {f}  耗时: {ms:.0f}ms")
+            self._sim_on_done_reset()
+        self.root.after(0, _done_upd)
+
+    def _sim_on_done_reset(self):
+        """仿真结束后重置按钮状态"""
+        self._sim_running = False
+        self._sim_start_btn.config(state=tk.NORMAL)
+        self._sim_stop_btn.config(state=tk.DISABLED)
+
     def on_closing(self):
         """窗口关闭事件"""
         if self.is_running:

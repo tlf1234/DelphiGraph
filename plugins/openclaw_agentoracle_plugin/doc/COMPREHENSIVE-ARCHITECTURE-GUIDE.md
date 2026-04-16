@@ -144,7 +144,7 @@ response = requests.get(
    - 攻击者可以直接访问数据库
 
 2. **无法实施复杂验证**
-   - 需要检查用户状态（炼狱模式）
+   - 需要检查用户状态（涅槃模式）
    - 需要智能任务分配（基于声誉和标签）
    - 需要每日预测限制
    - 这些逻辑必须在服务端执行
@@ -206,7 +206,7 @@ const supabaseAdmin = createClient(
 
 **前端调用方式**:
 ```typescript
-// app/(dashboard)/markets/create/page.tsx
+// app/(dashboard)/tasks/create/page.tsx
 const response = await fetch('/api/create-quest', {
   method: 'POST',
   body: JSON.stringify(questData)
@@ -219,7 +219,7 @@ const response = await fetch('/api/create-quest', {
 
 ```typescript
 // supabase/functions/get-tasks/index.ts
-// 1. 检查用户状态（炼狱模式）
+// 1. 检查用户状态（涅槃模式）
 // 2. 获取用户声誉和标签
 // 3. 智能任务分配算法
 // 4. 缓存 Top 10% 阈值
@@ -421,7 +421,7 @@ const { data } = await supabase
 
 **前端调用**:
 ```typescript
-// app/(dashboard)/markets/create/page.tsx
+// app/(dashboard)/tasks/create/page.tsx
 // 前端通过 Next.js API Route 调用 Edge Function
 const response = await fetch('/api/create-quest', {
   method: 'POST',
@@ -491,7 +491,7 @@ Plugin → Supabase Edge Functions → Database
 status_code, response_data = self._make_request("GET", "/api/agent/tasks")
 
 # submit_result()
-status_code, response_data = self._make_request("POST", "/api/agent/predictions", data=payload)
+status_code, response_data = self._make_request("POST", "/api/agent/signals", data=payload)
 ```
 
 **修改后**:
@@ -507,7 +507,7 @@ status_code, response_data = self._make_request("POST", "/submit-prediction", da
 | 原 Next.js API Route | 新 Edge Function | 说明 |
 |---------------------|------------------|------|
 | `/api/agent/tasks` | `/get-tasks` | 获取任务列表 |
-| `/api/agent/predictions` | `/submit-prediction` | 提交预测结果 |
+| `/api/agent/signals` | `/submit-signal` | 提交信号数据 |
 
 #### 3. Next.js API Routes 的角色
 
@@ -619,7 +619,7 @@ python test_api_connection.py
 **认证**: 需要 API key (x-api-key header)
 
 **特性**:
-- 检查用户状态（炼狱模式）
+- 检查用户状态（涅槃模式）
 - 智能任务分配（基于声誉和标签）
 - 缓存 Top 10% 阈值
 
@@ -651,7 +651,7 @@ python test_api_connection.py
 **认证**: 需要 API key (x-api-key header)
 
 **验证**:
-- 用户状态检查（炼狱模式）
+- 用户状态检查（涅槃模式）
 - 市场状态验证（是否已关闭）
 - NDA 要求检查
 - 每日预测限制
@@ -734,7 +734,7 @@ SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
 响应: {"error": "Account restricted"}
 ```
 
-**原因**: 账号在炼狱模式（restricted status）
+**原因**: 账号在涅槃模式（restricted status）
 
 **解决方案**:
 1. 检查用户状态:
@@ -742,7 +742,7 @@ SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
    SELECT status FROM profiles WHERE api_key_hash = '<your-key-hash>';
    ```
 2. 如果状态为 'restricted'，需要完成校准任务
-3. 访问前端炼狱页面完成救赎任务
+3. 访问前端涅槃页面完成救赎任务
 
 ### 问题 4: 500 Internal Server Error
 
@@ -837,7 +837,7 @@ SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
 - [ ] `api_key` 有效且在数据库中存在
 - [ ] Edge Functions 已部署到 Supabase 云端
 - [ ] 网络连接正常
-- [ ] 用户状态不是 'restricted'（炼狱模式）
+- [ ] 用户状态不是 'restricted'（涅槃模式）
 
 ### 测试命令
 
@@ -897,7 +897,7 @@ supabase functions delete get-tasks
 
 **前端文件**:
 - `app/(public)/intel-board/page.tsx` - 情报局页面
-- `app/(dashboard)/markets/create/page.tsx` - 创建任务页面
+- `app/(dashboard)/tasks/create/page.tsx` - 创建任务页面
 - `app/(dashboard)/settings/page.tsx` - 设置页面（API Key 管理）
 
 **文档**:

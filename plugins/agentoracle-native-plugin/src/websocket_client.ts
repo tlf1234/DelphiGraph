@@ -1,5 +1,8 @@
 import WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   WebSocketConfig,
   ConnectChallengeEvent,
@@ -7,10 +10,95 @@ import {
   ConnectResponse,
   ChatSendRequest,
   ChatEvent,
+  DeviceParams,
   PluginLogger,
   NetworkError,
   AuthenticationError
 } from './types';
+
+interface DeviceIdentityData {
+  deviceId: string;
+  publicKey: string;
+  privateKey: string;
+}
+
+interface LoadedDeviceIdentity {
+  deviceId: string;
+  publicKeyB64: string;
+  keyObject: crypto.KeyObject;
+}
+
+function loadOrCreateDeviceIdentity(identityFile: string): LoadedDeviceIdentity | null {
+  try {
+    let data: DeviceIdentityData;
+
+    if (fs.existsSync(identityFile)) {
+      data = JSON.parse(fs.readFileSync(identityFile, 'utf-8')) as DeviceIdentityData;
+    } else {
+      const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+      const pubJwk = publicKey.export({ format: 'jwk' }) as { x: string };
+      const privJwk = privateKey.export({ format: 'jwk' }) as { d: string };
+
+      const pubB64 = pubJwk.x;
+      const padding = (4 - (pubB64.length % 4)) % 4;
+      const pubBytes = Buffer.from(pubB64 + '='.repeat(padding), 'base64');
+      const deviceId = crypto.createHash('sha256').update(pubBytes).digest('hex');
+
+      data = { deviceId, publicKey: pubB64, privateKey: privJwk.d };
+      fs.mkdirSync(path.dirname(identityFile), { recursive: true });
+      fs.writeFileSync(identityFile, JSON.stringify(data, null, 2), 'utf-8');
+    }
+
+    const pubPadding = (4 - (data.publicKey.length % 4)) % 4;
+    const pubBytes = Buffer.from(data.publicKey + '='.repeat(pubPadding), 'base64');
+    const deviceId = crypto.createHash('sha256').update(pubBytes).digest('hex');
+
+    const keyObject = crypto.createPrivateKey({
+      key: { kty: 'OKP', crv: 'Ed25519', x: data.publicKey, d: data.privateKey },
+      format: 'jwk',
+    });
+
+    return { deviceId, publicKeyB64: data.publicKey, keyObject };
+  } catch (err) {
+    return null;
+  }
+}
+
+function buildDeviceParams(
+  identity: LoadedDeviceIdentity,
+  nonce: string,
+  gatewayToken: string,
+  platform: string
+): DeviceParams {
+  const signedAtMs = Date.now();
+  const normalizedPlatform = platform.toLowerCase().trim();
+  const payload = [
+    'v3',
+    identity.deviceId,
+    'cli',
+    'cli',
+    'operator',
+    'operator.read,operator.write',
+    String(signedAtMs),
+    gatewayToken,
+    nonce,
+    normalizedPlatform,
+    '',
+  ].join('|');
+
+  const signature = crypto
+    .sign(null, Buffer.from(payload, 'utf-8'), identity.keyObject)
+    .toString('base64url')
+    .replace(/=/g, '');
+
+  return {
+    id: identity.deviceId,
+    publicKey: identity.publicKeyB64,
+    signature,
+    signedAt: signedAtMs,
+    nonce,
+  };
+}
 
 /**
  * WebSocketClient 类
@@ -27,11 +115,21 @@ import {
 export class WebSocketClient {
   private onReconnectCallback?: () => void;
   private lastSuccessfulConnection: number = 0;
+  private deviceIdentity: LoadedDeviceIdentity | null = null;
 
   constructor(
     private config: WebSocketConfig,
     private logger: PluginLogger
-  ) {}
+  ) {
+    const identityFile = config.deviceIdentityFile ??
+      path.join(__dirname, '..', 'device_identity.json');
+    this.deviceIdentity = loadOrCreateDeviceIdentity(identityFile);
+    if (this.deviceIdentity) {
+      this.logger.info(`[agentoracle-native-plugin] 🔐 Device Identity 已加载 (ID: ${this.deviceIdentity.deviceId.slice(0, 16)}...)`);
+    } else {
+      this.logger.warn('[agentoracle-native-plugin] ⚠️ Device Identity 加载失败，operator.write scope 可能被 Gateway 清空');
+    }
+  }
 
   /**
    * 设置重连回调
@@ -285,30 +383,42 @@ export class WebSocketClient {
 
     // 步骤 2: 发送 connect 请求
     const connectId = uuidv4();
+    const platform = process.platform.toLowerCase().trim();
+    const connectParams: ConnectRequest['params'] = {
+      minProtocol: 3,
+      maxProtocol: 3,
+      client: {
+        id: 'cli',
+        version: '1.0.0',
+        platform,
+        mode: 'cli'
+      },
+      role: 'operator',
+      scopes: ['operator.read', 'operator.write'],
+      caps: [],
+      commands: [],
+      permissions: {},
+      auth: {
+        token: this.config.gatewayToken
+      },
+      locale: 'zh-CN',
+      userAgent: 'agentoracle-native-plugin/1.0.0'
+    };
+
+    if (this.deviceIdentity) {
+      connectParams.device = buildDeviceParams(
+        this.deviceIdentity,
+        nonce,
+        this.config.gatewayToken,
+        platform
+      );
+    }
+
     const connectRequest: ConnectRequest = {
       type: 'req',
       id: connectId,
       method: 'connect',
-      params: {
-        minProtocol: 3,
-        maxProtocol: 3,
-        client: {
-          id: 'cli',
-          version: '1.0.0',
-          platform: process.platform,
-          mode: 'cli'
-        },
-        role: 'operator',
-        scopes: ['operator.read', 'operator.write'],
-        caps: [],
-        commands: [],
-        permissions: {},
-        auth: {
-          token: this.config.gatewayToken
-        },
-        locale: 'zh-CN',
-        userAgent: 'agentoracle-native-plugin/1.0.0'
-      }
+      params: connectParams
     };
 
     this.logger.info('[agentoracle-native-plugin] Sending connect request...');
@@ -324,6 +434,11 @@ export class WebSocketClient {
     if (connectResponse.type !== 'res' || !connectResponse.ok) {
       const error = connectResponse.error || 'Unknown error';
       const errorMessage = typeof error === 'object' ? JSON.stringify(error) : String(error);
+      if (typeof error === 'object' && (error as any).code === 'NOT_PAIRED') {
+        const reqId = (error as any).details?.requestId ?? 'unknown';
+        this.logger.error(`[agentoracle-native-plugin] ❌ 设备配对未完成！请在 OpenClaw Control UI 中批准配对请求 ID=${reqId}，然后重启插件`);
+        throw new AuthenticationError(`Device pairing required (requestId=${reqId})`);
+      }
       this.logger.error(`[agentoracle-native-plugin] Authentication failed: ${errorMessage}`);
       this.logger.error(`[agentoracle-native-plugin] Full response: ${JSON.stringify(connectResponse)}`);
       throw new AuthenticationError(`Connection failed: ${errorMessage}`);

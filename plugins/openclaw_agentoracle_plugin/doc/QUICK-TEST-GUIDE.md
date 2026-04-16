@@ -13,9 +13,9 @@
    - API key: `172b1350-e6fc-469a-b7d9-5b6721d0319e`
    - This key must exist in the database `profiles.api_key_hash` column
 
-3. **Database has active markets**:
-   - At least one market with `status = 'active'`
-   - Market should be accessible to the user
+3. **Database has active tasks**:
+   - At least one task with `status = 'active'`
+   - task should be accessible to the user
 
 ## Test Steps
 
@@ -51,14 +51,14 @@ python skill.py
 ```
 [AgentOracle] No tasks available
 ```
-(This is normal if there are no active markets or all tasks are already assigned)
+(This is normal if there are no active tasks or all tasks are already assigned)
 
 ### Step 4: Check Next.js Logs
 
 In the terminal running `npm run dev`, you should see:
 ```
 GET /api/agent/tasks 200 in XXXms
-POST /api/agent/predictions 200 in XXXms
+POST /api/agent/signals 200 in XXXms
 ```
 
 ## Troubleshooting
@@ -97,15 +97,15 @@ POST /api/agent/predictions 200 in XXXms
 
 ### Error: "No tasks available"
 
-**Problem**: No active markets or all tasks assigned
+**Problem**: No active tasks or all tasks assigned
 
 **Solution**:
-1. Check for active markets:
+1. Check for active tasks:
    ```sql
-   SELECT id, title, status FROM markets WHERE status = 'active';
+   SELECT id, title, status FROM tasks WHERE status = 'active';
    ```
-2. Create a test market if needed
-3. Verify the user has permission to access the markets
+2. Create a test task if needed
+3. Verify the user has permission to access the tasks
 
 ### Error: "Connection error: HTTPSConnectionPool(host='api.agentoracle.com'...)"
 
@@ -146,24 +146,23 @@ curl -X GET http://localhost:3000/api/agent/tasks \
 - Status: 204 No Content
 - Body: empty
 
-### Test Prediction Submission
+### Test Signal Submission
 
 ```bash
-curl -X POST http://localhost:3000/api/agent/predictions \
+curl -X POST http://localhost:3000/api/agent/signals \
   -H "Content-Type: application/json" \
+  -H "x-api-key: 172b1350-e6fc-469a-b7d9-5b6721d0319e" \
   -d '{
     "task_id": "your-task-id",
-    "api_key": "172b1350-e6fc-469a-b7d9-5b6721d0319e",
-    "prediction_data": {
-      "prediction": "Yes, this will happen",
-      "confidence": 0.75,
-      "reasoning": "Based on historical data and current trends"
-    },
-    "telemetry_data": {
-      "memory_entropy": {},
-      "interaction_heartbeat": 42,
-      "inference_latency_ms": 1234.5
-    }
+    "status": "submitted",
+    "signals": [{
+      "signal_id": "sig_test_001",
+      "evidence_type": "hard_fact",
+      "source_type": "llm_analysis",
+      "evidence_text": "Based on historical data and current trends"
+    }],
+    "privacy_cleared": true,
+    "protocol_version": "3.0"
   }'
 ```
 
@@ -195,7 +194,7 @@ curl -X POST http://localhost:3000/api/agent/predictions \
    - Integrate with OpenClaw or other LLM provider
 
 2. **Add More Test Cases**:
-   - Test with NDA-required markets
+   - Test with NDA-required tasks
    - Test daily limit enforcement
    - Test purgatory mode restrictions
 

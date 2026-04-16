@@ -26,6 +26,12 @@ requests>=2.31.0,<3.0.0
 #          Provides async WebSocket support with automatic reconnection
 websockets>=12.0,<13.0
 
+# Cryptographic Operations
+# Used by: device_identity.py
+# Purpose: Ed25519 digital signatures for OpenClaw 4.x device identity authentication
+#          Provides secure device pairing and authentication
+cryptography>=41.0.0
+
 # HTTP Connection Retry Support
 # Used by: api_client.py (via requests.adapters.HTTPAdapter)
 # Purpose: Provides automatic retry logic with exponential backoff for

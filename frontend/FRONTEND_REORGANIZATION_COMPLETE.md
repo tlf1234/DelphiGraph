@@ -9,7 +9,7 @@
 - ✅ `components/home/` - 合并到 shared
 - ✅ `components/navigation/` - 合并到 layout
 - ✅ `components/dashboard/` - 合并到 layout
-- ✅ `components/market-search/` - 合并到 markets
+- ✅ `components/task-search/` - 合并到 tasks
 
 ### 新的目录结构
 
@@ -20,16 +20,16 @@ frontend/src/app/
 │   ├── login/
 │   └── callback/
 ├── (dashboard)/         # 需要认证的页面
-│   ├── markets/
+│   ├── tasks/
 │   ├── profile/
 │   ├── settings/
 │   ├── earnings/
 │   ├── predictions/
 │   └── admin/
 ├── (public)/            # 公开页面
-│   ├── markets/
+│   ├── tasks/
 │   ├── leaderboard/
-│   ├── market-search/
+│   ├── task-search/
 │   └── purgatory/
 ├── api/                 # API 路由
 └── page.tsx             # 首页
@@ -48,15 +48,15 @@ frontend/src/components/
 │   ├── hot-tasks-carousel.tsx
 │   └── live-pulse.tsx
 ├── auth/                # 认证组件
-├── markets/             # 市场相关（已合并 market-search）
-│   ├── market-card.tsx
-│   ├── market-creation-form.tsx
+├── tasks/             # 市场相关（已合并 task-search）
+│   ├── task-card.tsx
+│   ├── task-creation-form.tsx
 │   ├── crowdfunding-progress.tsx
 │   └── private-task-card.tsx
 ├── profile/             # 用户档案
 ├── search/              # 搜索相关
 ├── leaderboard/         # 排行榜
-├── purgatory/           # 炼狱模式
+├── purgatory/           # 涅槃模式
 ├── settings/            # 设置
 ├── earnings/            # 收益
 └── reputation/          # 信誉系统
@@ -68,7 +68,7 @@ frontend/src/components/
 - ✅ `app/page.tsx`
 - ✅ `app/(public)/layout.tsx`
 - ✅ `app/(dashboard)/layout.tsx`
-- ✅ `app/(public)/market-search/page.tsx`
+- ✅ `app/(public)/task-search/page.tsx`
 - ✅ `components/layout/global-nav.tsx`
 
 ## 📈 改进效果
@@ -81,10 +81,10 @@ frontend/src/components/
 ### 提升清晰度
 - **layout/** - 所有布局和导航组件集中管理
 - **shared/** - 跨页面共享的组件统一存放
-- **markets/** - 市场相关功能完整集中
+- **tasks/** - 市场相关功能完整集中
 
 ### 命名统一
-- 移除 `market-search` vs `markets` 的混淆
+- 移除 `task-search` vs `tasks` 的混淆
 - 统一使用功能性命名
 
 ## 🎯 目录职责
@@ -93,7 +93,7 @@ frontend/src/components/
 |------|------|----------|
 | `layout/` | 页面布局、导航 | global-nav, user-menu |
 | `shared/` | 跨页面共享组件 | language-switcher, live-pulse |
-| `markets/` | 市场/任务相关 | market-card, crowdfunding-progress |
+| `tasks/` | 市场/任务相关 | task-card, crowdfunding-progress |
 | `auth/` | 认证相关 | login-button, login-content |
 | `ui/` | 基础 UI 组件 | button, card, input |
 
@@ -112,8 +112,8 @@ frontend/src/components/
    - 将公开页面直接放在 app 下
    - 简化路由结构
 
-2. **统一 markets 路径**：
-   - 考虑合并 `(dashboard)/markets` 和 `(public)/markets`
+2. **统一 tasks 路径**：
+   - 考虑合并 `(dashboard)/tasks` 和 `(public)/tasks`
    - 使用权限控制而非路由分离
 
 3. **API 路由整理**：

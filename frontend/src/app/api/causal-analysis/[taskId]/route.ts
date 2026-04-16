@@ -20,6 +20,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { fetchCausalAnalysis } from '@/services/causal'
 
 // 因果引擎后端服务地址（Python FastAPI）
 const CAUSAL_ENGINE_URL = process.env.CAUSAL_ENGINE_URL || 'http://localhost:8100'
@@ -45,55 +46,28 @@ const CAUSAL_ENGINE_URL = process.env.CAUSAL_ENGINE_URL || 'http://localhost:810
  *   - 页面初始加载时获取历史分析结果
  */
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: { taskId: string } }
 ) {
   const taskId = params.taskId
   console.log(`[causal-analysis GET] ▶ taskId=${taskId}`)
-  
+
   try {
-    // ================================================================
-    // Step 1: 身份验证
-    // ================================================================
-    const supabase = await createClient()
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
+    const result = await fetchCausalAnalysis(taskId)
+
+    if (!result) {
       console.warn('[causal-analysis GET] ⚠️ No session - returning 401')
       return NextResponse.json({ error: '请先登录' }, { status: 401 })
     }
-    console.log(`[causal-analysis GET] session user=${session.user.id.slice(0, 8)}...`)
 
-    // ================================================================
-    // Step 2: 从 Supabase 查询最新分析结果
-    // ================================================================
-    // 查询条件:
-    //   - task_id = taskId
-    //   - is_latest = true（只返回最新版本）
-    const { data: analysis, error } = await supabase
-      .from('causal_analyses')
-      .select('*')
-      .eq('task_id', taskId)
-      .eq('is_latest', true)
-      .single()
-
-    // ================================================================
-    // Step 3: 处理查询结果
-    // ================================================================
-    if (error || !analysis) {
-      // 没有找到分析结果（正常情况，返回 200）
-      console.log(`[causal-analysis GET] No analysis found: ${error?.message || 'empty result'}`)
-      return NextResponse.json(
-        { status: 'none', message: '该市场暂无因果分析结果' },
-        { status: 200 }
-      )
+    if ('status' in result && result.status === 'none') {
+      console.log(`[causal-analysis GET] No analysis found`)
+      return NextResponse.json(result, { status: 200 })
     }
 
-    // 找到分析结果，返回完整数据
-    console.log(`[causal-analysis GET] ✅ Found analysis id=${analysis.id} v${analysis.version} status=${analysis.status}`)
-    return NextResponse.json(analysis)
-    
+    console.log(`[causal-analysis GET] ✅ Found analysis`)
+    return NextResponse.json(result)
   } catch (error) {
-    // 服务器内部错误
     console.error('[causal-analysis GET] ❌', error)
     return NextResponse.json({ error: '服务器错误' }, { status: 500 })
   }

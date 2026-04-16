@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
 
   // ── Verify survey exists ─────────────────────────────────────────────
   const { data: survey } = await admin
-    .from('surveys')
+    .from('survey_tasks')
     .select('id, status, title')
     .eq('id', survey_id)
     .maybeSingle()
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
   await admin.from('survey_responses').delete().eq('survey_id', survey_id)
   await admin.from('survey_analyses').delete().eq('survey_id', survey_id)
   await admin
-    .from('surveys')
+    .from('survey_tasks')
     .update({ status: 'draft', response_count: 0, started_at: null, completed_at: null })
     .eq('id', survey_id)
   console.log(`[survey-prepare] Cleared responses/analyses, reset status→draft`)
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json(
-    { error: 'No SimAgents found. Run the prediction simulate test first to create agents.' },
+    { error: 'No SimAgents found. Run the signal simulate test first to create agents.' },
     { status: 404 },
   )
 }

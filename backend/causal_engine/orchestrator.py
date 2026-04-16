@@ -7,14 +7,14 @@
 
 完整流程（4 个阶段）:
     Phase 1: 预处理 (SignalPreprocessor)
-        - 解析原始预测数据，提取信号
+        - 解析原始信号提交数据，提取信号
         - 去重、聚类、质量评分
         - 识别少数派观点
     
     Phase 2: 本体生成 (CausalOntologyGenerator)
         - 基于信号识别因果因子类型
         - 提取因果关系（Factor → Factor, Factor → Target）
-        - 定义预测目标
+        - 定义分析目标
     
     Phase 3: 图谱构建 (CausalGraphBuilder)
         - 将本体转换为图结构（节点 + 边）
@@ -23,13 +23,14 @@
     
     Phase 4: 因果推演 (CausalInferenceEngine)
         - 基于图谱执行推理
-        - 计算预测方向和置信度
+        - 计算分析方向和置信度
         - 生成关键路径和敏感性分析
 
 数据流:
-    原始预测 → 信号聚类 → 因果本体 → 因果图谱 → 推演结论
+    原始信号 → 信号聚类 → 因果本体 → 因果图谱 → 推演结论
 """
 
+import asyncio
 import logging
 import time
 from typing import Any, Callable, Coroutine, Dict, List, Optional
@@ -104,9 +105,9 @@ class CausalEngineOrchestrator:
     async def analyze(
         self,
         task_id: str,
-        market_title: str,
-        predictions: List[Dict[str, Any]],
-        market_description: Optional[str] = None,
+        task_title: str,
+        submissions: List[Dict[str, Any]],
+        task_description: Optional[str] = None,
         progress_callback: ProgressCallback = None,
     ) -> Dict[str, Any]:
         """完整因果分析流水线（核心入口函数）
@@ -115,13 +116,13 @@ class CausalEngineOrchestrator:
         1. 预处理：解析信号、去重聚类、质量评分
         2. 本体生成：识别因子类型、提取因果关系
         3. 图谱构建：构建节点和边、分配权重
-        4. 因果推演：计算预测方向、置信度、关键路径
+        4. 因果推演：计算分析方向、置信度、关键路径
 
         参数:
-            task_id: 市场/任务 ID（用于日志追踪）
-            market_title: 市场标题（预测问题，如"美联储是否降息？"）
-            predictions: 原始预测数据列表（来自 Supabase）
-            market_description: 可选的市场背景描述
+            task_id: 任务 ID（用于日志追踪）
+            task_title: 任务标题（分析问题，如"美联储是否降息？"）
+            submissions: 信号提交数据列表（来自 signal_submissions）
+            task_description: 可选的任务背景描述
             progress_callback: 进度回调函数（用于实时更新前端）
 
         返回:
@@ -140,12 +141,12 @@ class CausalEngineOrchestrator:
         # ══════════════════════════════════════════════════════════════
         # 前置校验：信号数量是否足够
         # ══════════════════════════════════════════════════════════════
-        if len(predictions) < self.MIN_SIGNALS:
+        if len(submissions) < self.MIN_SIGNALS:
             return {
                 "status": "insufficient_signals",
-                "count": len(predictions),
+                "count": len(submissions),
                 "min_required": self.MIN_SIGNALS,
-                "message": f"线索数量不足（{len(predictions)}/{self.MIN_SIGNALS}）",
+                "message": f"线索数量不足（{len(submissions)}/{self.MIN_SIGNALS}）",
             }
 
         timing: Dict[str, float] = {}
@@ -154,25 +155,25 @@ class CausalEngineOrchestrator:
             # Phase 1: 预处理（信号提取与聚类）
             # ══════════════════════════════════════════════════════════════
             # 功能:
-            #   - 从原始预测中提取结构化信号
+            #   - 从原始提交中提取结构化信号
             #   - 去重、聚类（基于语义相似度）
             #   - 质量评分（相关性、可信度）
             #   - 识别少数派观点（低频但高质量的信号）
-            # 输入: 原始预测数据（Agent 提交的证据、推理等）
+            # 输入: 原始信号提交数据（Agent 提交的证据、推理等）
             # 输出: PreprocessResult（包含聚类、少数派、统计信息）
             if progress_callback:
                 await progress_callback(
                     1, total_phases, "预处理线索数据..."
                 )
             logger.info(
-                "Phase 1: 开始预处理 %d 条原始数据", len(predictions)
+                "Phase 1: 开始预处理 %d 条原始数据", len(submissions)
             )
             _t1 = time.time()
 
             preprocess_result = await self.preprocessor.process(
                 task_id=task_id,
-                raw_predictions=predictions,
-                market_query=market_title,
+                raw_submissions=submissions,
+                task_query=task_title,
             )
             timing["phase1_preprocess"] = round(time.time() - _t1, 2)
             logger.info(
@@ -190,9 +191,9 @@ class CausalEngineOrchestrator:
             # 功能:
             #   - 基于聚类后的信号，识别因果因子类型（如"通胀预期"、"就业数据"）
             #   - 提取因果关系（Factor → Factor, Factor → Target）
-            #   - 定义预测目标（Target，如"美联储降息概率"）
+            #   - 定义分析目标（Target，如"美联储降息概率"）
             # 方法: 调用 LLM 分析信号内容，提取结构化因果知识
-            # 输入: PreprocessResult（聚类后的信号）
+            # 输入: PreprocessResult（聚类后的信号，含 Step 5.5 的簇间关系）
             # 输出: CausalOntology（因子类型、因果关系、目标定义）
             if progress_callback:
                 await progress_callback(
@@ -203,8 +204,8 @@ class CausalEngineOrchestrator:
 
             ontology = await self.ontology_gen.generate(
                 preprocess_result,
-                market_title,
-                market_description,
+                task_title,
+                task_description,
             )
             timing["phase2_ontology"] = round(time.time() - _t2, 2)
             logger.info(
@@ -212,7 +213,7 @@ class CausalEngineOrchestrator:
                 timing["phase2_ontology"],
                 len(ontology.factor_types),
                 len(ontology.raw_causal_relations),
-                ontology.prediction_target,
+                ontology.analysis_target,
             )
 
             # ══════════════════════════════════════════════════════════════
@@ -244,17 +245,17 @@ class CausalEngineOrchestrator:
             )
 
             # ══════════════════════════════════════════════════════════════
-            # Phase 4: 因果推演（图谱 → 预测结论）
+            # Phase 4: 因果推演（图谱 → 分析结论）
             # ══════════════════════════════════════════════════════════════
             # 功能:
-            #   - 基于因果图谱执行推理，计算预测方向（看涨/看跌）
+            #   - 基于因果图谱执行推理，计算分析方向（看涨/看跌）
             #   - 计算置信度（基于路径强度、信号质量）
             #   - 生成关键路径（影响最大的因果链）
             #   - 敏感性分析（识别关键因子）
             #   - 少数派警告（检测被忽视的重要信号）
             # 方法: 图遍历 + 权重传播 + LLM 辅助推理
             # 输入: CausalGraph + PreprocessResult
-            # 输出: 更新后的 CausalGraph（含预测方向、置信度等）
+            # 输出: 更新后的 CausalGraph（含分析方向、置信度等）
             if progress_callback:
                 await progress_callback(
                     4, total_phases, "执行因果推演..."
@@ -269,8 +270,8 @@ class CausalEngineOrchestrator:
             logger.info(
                 "Phase 4 完成 (%.2fs): 方向=%s, 置信度=%.2f",
                 timing["phase4_inference"],
-                graph.prediction_direction,
-                graph.prediction_confidence,
+                graph.analysis_direction,
+                graph.analysis_confidence,
             )
 
             elapsed = time.time() - start_time
@@ -295,7 +296,7 @@ class CausalEngineOrchestrator:
             # 说明: 因果引擎只生成 Factor → Target 层，前端需要 4 层可视化
             # 充实内容: Agent → Signal → Factor → Target
             enriched_graph = self._enrich_graph_for_frontend(
-                graph, preprocess_result, predictions
+                graph, preprocess_result, submissions
             )
 
             return {
@@ -305,8 +306,8 @@ class CausalEngineOrchestrator:
                 "preprocess_summary": preprocess_result.to_dict(),
                 "conclusion": {
                     # 基础推演结论
-                    "direction": graph.prediction_direction,
-                    "confidence": graph.prediction_confidence,
+                    "direction": graph.analysis_direction,
+                    "confidence": graph.analysis_confidence,
                     "confidence_interval": graph.confidence_interval,
                     "critical_paths": graph.critical_paths,
                     "critical_path_length": max(
@@ -314,7 +315,7 @@ class CausalEngineOrchestrator:
                     ),
                     "sensitivity_count": len([
                         n for n in graph.nodes
-                        if not n.is_prediction_target and n.impact_score > 0.3
+                        if not n.is_analysis_target and n.impact_score > 0.3
                     ]),
                     "minority_warning": graph.minority_warning,
                     # LLM完整推理输出（key_drivers/risk_factors/one_line_conclusion等）
@@ -347,7 +348,7 @@ class CausalEngineOrchestrator:
     def _enrich_graph_for_frontend(
         graph: CausalGraph,
         preprocess_result,
-        raw_predictions: List[Dict[str, Any]],
+        raw_submissions: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """将因果引擎产出的图谱充实为前端需要的 5 层结构
         
@@ -358,19 +359,13 @@ class CausalEngineOrchestrator:
         充实策略:
             1. 保留原有 Cluster、Factor 和 Target 节点
             2. 从 preprocess_result 提取 Signal 节点
-            3. 从 raw_predictions 提取 Agent 节点
+            3. 从 raw_submissions 提取 Agent 节点
             4. 建立连接关系:
                - Agent → Signal（基于 agent_id）
                - Signal → Cluster（基于 cluster_id）
                - Cluster → Factor（原有映射关系 cluster_edges）
                - Factor → Factor（原有因果关系）
                - Factor → Target（原有因果关系）
-        
-        数据映射:
-            - signal.agent_id → Agent 节点
-            - signal.cluster_id → Cluster 节点
-            - cluster.cluster_id → factor_node_id（通过 cluster_edges）
-            - node.evidence_ids → Signal 节点
         """
         base = graph.to_dict()
         enriched_nodes = []
@@ -382,7 +377,7 @@ class CausalEngineOrchestrator:
             enriched_nodes.append(cluster_node)
 
         # -- 2. 标记现有 factor/target 节点的 node_type（Layer 4 & 5）--
-        target_node_id = graph.prediction_target_node_id
+        target_node_id = graph.analysis_target_node_id
 
         for nd in base["nodes"]:
             nd["node_type"] = "target" if nd.get("is_target") else "factor"
@@ -419,6 +414,13 @@ class CausalEngineOrchestrator:
         seen_signal_ids: set = set()
         all_signals = []
 
+        _audit_clusters = len(preprocess_result.clusters)
+        _audit_total_in_clusters = sum(len(c.signals) for c in preprocess_result.clusters)
+        logger.info(
+            "[SIGNAL AUDIT] _enrich_graph_for_frontend(): clusters=%d  total_signals_in_clusters=%d  raw_submissions=%d",
+            _audit_clusters, _audit_total_in_clusters, len(raw_submissions),
+        )
+
         # 第一轮：每簇保底
         for cluster in preprocess_result.clusters:
             top_sigs = sorted(cluster.signals, key=lambda s: s.quality_score, reverse=True)
@@ -438,14 +440,15 @@ class CausalEngineOrchestrator:
             ]
             candidates.sort(key=lambda s: s.quality_score, reverse=True)
             for s in candidates[:remaining_slots]:
-                seen_signal_ids.add(s.signal_id)
-                all_signals.append(s)
+                if s.signal_id not in seen_signal_ids:
+                    seen_signal_ids.add(s.signal_id)
+                    all_signals.append(s)
         
-        # -- 7. 构建 agent_id → prediction 映射 --
-        pred_by_agent = {}
-        for pred in raw_predictions:
-            aid = pred.get("agent_id") or pred.get("user_id", "unknown")
-            pred_by_agent[aid] = pred
+        # -- 7. 构建 agent_id → submission 映射 --
+        sub_by_agent = {}
+        for sub in raw_submissions:
+            aid = sub.get("agent_id") or sub.get("user_id", "unknown")
+            sub_by_agent[aid] = sub
 
         # -- 6. 生成 agent + signal 节点和边 --
         seen_agents = set()
@@ -466,13 +469,8 @@ class CausalEngineOrchestrator:
             agent_id = f"agent_{sig.agent_id.replace('-', '')[:12]}"
             if agent_id not in seen_agents:
                 seen_agents.add(agent_id)
-                pred = pred_by_agent.get(sig.agent_id, {})
-                prob = float(pred.get("probability", 0.5))
-                stance = (
-                    "bullish" if prob > 0.6
-                    else "bearish" if prob < 0.4
-                    else "neutral"
-                )
+                sub = sub_by_agent.get(sig.agent_id, {})
+                stance = sig.sentiment_tag or "neutral"
                 enriched_nodes.append({
                     "id": agent_id,
                     "name": f"Agent-{sig.agent_id[:6]}",
@@ -509,20 +507,52 @@ class CausalEngineOrchestrator:
 
         sc_edges = [e for e in enriched_edges if e.get("edge_type") == "signal_cluster"]
         logger.info(
-            "[DEBUG] all_signals=%d, signal_to_cluster entries=%d, signal_cluster edges=%d",
+            "[SIGNAL AUDIT] all_signals=%d  signal_to_cluster entries=%d  signal_cluster edges=%d",
             len(all_signals), len(signal_to_cluster), len(sc_edges),
         )
 
         base["nodes"] = enriched_nodes
         base["edges"] = enriched_edges
 
+        # ── 详细节点和边统计 ──────────────────────────────────────────
+        node_type_counts = {}
+        for n in enriched_nodes:
+            t = n.get("node_type", "unknown")
+            node_type_counts[t] = node_type_counts.get(t, 0) + 1
+        edge_type_counts = {}
+        for e in enriched_edges:
+            t = e.get("edge_type", "unknown")
+            edge_type_counts[t] = edge_type_counts.get(t, 0) + 1
+
         logger.info(
-            "5层图谱充实完成: %d 节点 (%d agent, %d signal, %d cluster, %d factor/target), %d 边",
+            "\n" + "─" * 55 + "\n"
+            "  5层图谱充实完成\n"
+            "  ── 节点分布 ──────────────────────────\n"
+            "  agent   : %d  (Layer 1)\n"
+            "  signal  : %d  (Layer 2)\n"
+            "  cluster : %d  (Layer 3)\n"
+            "  factor  : %d  (Layer 4)\n"
+            "  target  : %d  (Layer 5)\n"
+            "  合计    : %d\n"
+            "  ── 边分布 ────────────────────────────\n"
+            "  agent→signal   : %d\n"
+            "  signal→cluster : %d\n"
+            "  cluster→factor : %d\n"
+            "  factor→factor  : %d\n"
+            "  factor→target  : %d\n"
+            "  合计           : %d\n"
+            + "─" * 55,
+            node_type_counts.get("agent", 0),
+            node_type_counts.get("signal", 0),
+            node_type_counts.get("cluster", 0),
+            node_type_counts.get("factor", 0),
+            node_type_counts.get("target", 0),
             len(enriched_nodes),
-            len(seen_agents),
-            len(all_signals),
-            len(graph.cluster_nodes),
-            len(graph.nodes),
+            edge_type_counts.get("agent_signal", 0),
+            edge_type_counts.get("signal_cluster", 0),
+            edge_type_counts.get("cluster_factor", 0),
+            edge_type_counts.get("factor_factor", 0),
+            edge_type_counts.get("factor_target", 0),
             len(enriched_edges),
         )
         return base

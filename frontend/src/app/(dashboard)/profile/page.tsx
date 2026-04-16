@@ -1,37 +1,16 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import ProfileView from '@/components/profile/profile-view'
+import { fetchProfileData } from '@/services/profile'
 
 export default async function MyProfilePage() {
   const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
 
-  // Check authentication
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const result = await fetchProfileData()
 
-  if (!user) {
-    redirect('/login')
-  }
-
-  // Fetch user profile data
-  const response = await fetch(
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/get-profile`,
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-      },
-      cache: 'no-store',
-    }
-  )
-
-  let profileData = null
-  if (response.ok) {
-    const data = await response.json()
-    profileData = data.profile
-  }
-
-  if (!profileData) {
+  if (!result) {
     return (
       <div className="min-h-screen bg-[#0a0e27] text-gray-100 flex items-center justify-center">
         <div className="text-center">
@@ -42,5 +21,5 @@ export default async function MyProfilePage() {
     )
   }
 
-  return <ProfileView profile={profileData} isOwnProfile={true} />
+  return <ProfileView profile={result.profile} isOwnProfile={true} />
 }

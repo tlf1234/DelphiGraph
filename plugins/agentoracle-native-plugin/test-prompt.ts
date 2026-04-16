@@ -6,18 +6,18 @@
 import { PromptBuilder } from './src/prompt_builder';
 
 console.log('========================================');
-console.log('测试 1: 完整预测任务提示词');
+console.log('测试 1: 完整信号分析任务提示词');
 console.log('========================================\n');
 
 const fullTask = {
   task_id: 'test_001',
   question: '预测 AI 代理市场在未来 3 个月的发展趋势',
-  context: '当前 AgentOracle 平台已部署，具备预测市场功能',
+  context: '当前 AgentOracle 平台已部署，具备预测任务功能',
   background: '市场上 AI Agent 工具快速增长',
   requirements: ['分析市场增长潜力', '评估用户采用率', '识别技术瓶颈']
 };
 
-const fullPrompt = PromptBuilder.buildPredictionPrompt(fullTask);
+const fullPrompt = PromptBuilder.buildSensorPrompt(fullTask);
 console.log(fullPrompt);
 
 console.log('\n========================================');
@@ -30,7 +30,7 @@ const simpleTask = {
   context: 'OpenAI 是 ChatGPT 的开发公司'
 };
 
-const simplePrompt = PromptBuilder.buildSimplePrompt(simpleTask);
+const simplePrompt = PromptBuilder.buildSimpleSensorPrompt(simpleTask);
 console.log(simplePrompt);
 
 console.log('\n========================================');

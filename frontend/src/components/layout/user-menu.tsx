@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { User } from '@supabase/supabase-js'
 import {
-  LayoutDashboard,
   Target,
   DollarSign,
   UserCircle,
@@ -60,8 +59,7 @@ export default function UserMenu({ user, userProfile }: UserMenuProps) {
   }
 
   const menuItems = [
-    { href: '/dashboard', label: '仪表盘', icon: LayoutDashboard },
-    { href: '/predictions', label: '我的预测', icon: Target },
+    { href: '/submissions', label: '我的提交', icon: Target },
     { href: '/earnings', label: '收益历史', icon: DollarSign },
     { href: '/profile', label: '个人档案', icon: UserCircle },
     { href: '/settings', label: '设置', icon: Settings },

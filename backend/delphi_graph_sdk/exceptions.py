@@ -18,8 +18,8 @@ class ValidationError(DelphiGraphError):
     pass
 
 
-class MarketClosedError(DelphiGraphError):
-    """Raised when attempting to submit prediction to a closed market"""
+class TaskClosedError(DelphiGraphError):
+    """Raised when attempting to submit signal to a closed task"""
     pass
 
 

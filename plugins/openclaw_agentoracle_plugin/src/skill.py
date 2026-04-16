@@ -26,7 +26,6 @@ try:
     from .websocket_client import OpenClawWebSocketClient
     from .agent_manager import AgentManager
     from .submission_logger import SubmissionLogger
-    from .env_detector import EnvironmentDetector
 except ImportError:
     # Fall back to absolute imports (when run directly)
     from logger import setup_logger
@@ -38,7 +37,6 @@ except ImportError:
     from websocket_client import OpenClawWebSocketClient
     from agent_manager import AgentManager
     from submission_logger import SubmissionLogger
-    from env_detector import EnvironmentDetector
 
 
 class PluginManager:
@@ -673,13 +671,16 @@ class BackgroundDaemon:
         
         # Initialize WebSocket client for OpenClaw Gateway
         self.logger.info("[AgentOracle] ✅ 使用 WebSocket 集成方式 (OpenClaw Gateway Protocol v3)")
+        _plugin_dir = os.path.dirname(os.path.abspath(__file__))
         self.ws_client = OpenClawWebSocketClient(
             gateway_url=gateway_ws_url,
             gateway_token=gateway_token,
             timeout=300,  # 5 minutes for large responses
             max_retries=3,
             connect_timeout=10,
-            message_timeout=20
+            message_timeout=20,
+            use_device_identity=True,
+            device_identity_file=os.path.join(_plugin_dir, "device_identity.json")
         )
         
         # Initialize agent manager (防弹级进程管理) - optional
@@ -724,23 +725,12 @@ class BackgroundDaemon:
         Example:
             >>> daemon = BackgroundDaemon(api_key="abc123...")
             >>> daemon.start()
-            [AgentOracle] Validating API key...
-            [AgentOracle] API key validated successfully
             [AgentOracle] Background daemon started
             >>> # Daemon now polling in background thread
         """
         if self.running:
             self.logger.warning("[AgentOracle] 后台守护进程已在运行")  # Background daemon is already running
             return
-        
-        # Validate API key before starting daemon
-        self.logger.info("[AgentOracle] 正在验证 API key...")  # Validating API key...
-        try:
-            self._validate_api_key()
-            self.logger.info("[AgentOracle] ✅ API key 验证成功")  # API key validated successfully
-        except Exception as e:
-            self.logger.error(f"[AgentOracle] ❌ API key 验证失败: {e}")  # API key validation failed
-            raise
         
         # Start agent manager health check (if enabled)
         if self.agent_manager:
@@ -803,60 +793,6 @@ class BackgroundDaemon:
         else:
             self.logger.info("[AgentOracle] 后台守护进程已停止")  # Background daemon stopped
     
-    def _validate_api_key(self) -> None:
-        """Validate API key by making a test request to the server.
-        
-        Makes a lightweight API call to verify that the API key is valid and
-        the server is reachable. This is called during daemon startup to fail
-        fast if the configuration is incorrect.
-        
-        The validation uses the /api/agent/tasks endpoint, which is a lightweight
-        operation that only checks authentication without performing heavy
-        database queries.
-        
-        Raises:
-            Exception: API key validation failed. Possible reasons:
-                - Invalid or expired API key (HTTP 401)
-                - Account restricted/purgatory (HTTP 403)
-                - Server unreachable (network error)
-                - Other server errors (HTTP 5xx)
-                
-        Example:
-            >>> daemon = BackgroundDaemon(api_key="abc123...")
-            >>> daemon._validate_api_key()  # Raises exception if invalid
-        """
-        try:
-            # Make a test request to /api/agent/tasks endpoint
-            # This endpoint requires authentication and will return 401 if key is invalid
-            status_code, response_data = self.api_client._make_request("GET", "/api/agent/tasks")
-            
-            # Check status code
-            if status_code == 200:
-                # Success - API key is valid
-                return
-            elif status_code == 204:
-                # No tasks available, but authentication succeeded
-                return
-            elif status_code == 401:
-                # Authentication failed - invalid API key
-                error_msg = "Invalid API key"
-                if response_data and isinstance(response_data, dict):
-                    error_msg = response_data.get("message", error_msg)
-                raise Exception(f"Authentication failed: {error_msg}")
-            elif status_code == 403:
-                # Account restricted (purgatory) - but key is valid
-                self.logger.warning("[AgentOracle] Account is restricted (purgatory mode)")
-                return
-            else:
-                # Other error
-                error_msg = f"Server returned status code {status_code}"
-                if response_data and isinstance(response_data, dict):
-                    error_msg = response_data.get("message", error_msg)
-                raise Exception(f"API validation failed: {error_msg}")
-                
-        except Exception as e:
-            # Re-raise with more context
-            raise Exception(f"Failed to validate API key: {e}")
     
     def _calculate_next_interval(self) -> float:
         """Calculate next polling interval with random jitter.
@@ -964,8 +900,8 @@ class BackgroundDaemon:
         2. Starts timing for latency measurement
         3. Executes inference using local LLM
         4. Stops timing and collects telemetry
-        5. Validates prediction string lengths
-        6. Sanitizes prediction to remove PII
+        5. Validates submission string lengths
+        6. Sanitizes submission to remove PII
         7. Assembles complete payload
         8. Submits result to AgentOracle server
         
@@ -975,7 +911,7 @@ class BackgroundDaemon:
         Args:
             task: Task object containing at minimum:
                 - id: Unique task identifier (required)
-                - question: Prediction question text (required)
+                - question: Task question text (required)
                 - title: Task title (optional)
                 
         Example:
@@ -983,7 +919,7 @@ class BackgroundDaemon:
             >>> task = {
             ...     "id": "task-123",
             ...     "question": "Will it rain tomorrow?",
-            ...     "title": "Weather Prediction"
+            ...     "title": "Weather Analysis"
             ... }
             >>> daemon.process_task(task)
             [AgentOracle] Analyzing task...
@@ -991,8 +927,8 @@ class BackgroundDaemon:
         """
         try:
             # Log task details
-            task_id = task.get('id')
-            title = task.get('title', 'N/A')
+            task_id = task.get('task_id')
+            title = task.get('title', 'N/A')  # title 不在 API 响应中，仅作展示用，默认 N/A
             question = task.get('question')
             keywords = task.get('required_niche_tags', [])
             reward_pool = task.get('reward_pool', 0)
@@ -1009,7 +945,7 @@ class BackgroundDaemon:
             self.logger.info("[AgentOracle] ========================================")
             
             if not task_id:
-                self.logger.error("[AgentOracle] Task missing id field")
+                self.logger.error("[AgentOracle] Task missing task_id field")
                 return
             
             if not question:
@@ -1025,10 +961,10 @@ class BackgroundDaemon:
             
             # Execute inference using local LLM
             try:
-                prediction_data = self.execute_inference(question, keywords)
+                inference_data = self.execute_inference(question, keywords)
             except Exception as e:
                 self.logger.error(f"[AgentOracle] Error during inference: {e}", exc_info=True)
-                prediction_data = None
+                inference_data = None
             
             # Stop timing
             try:
@@ -1037,25 +973,112 @@ class BackgroundDaemon:
                 self.logger.error(f"[AgentOracle] Error stopping timing: {e}", exc_info=True)
             
             # Check if inference failed
-            if prediction_data is None:
+            if inference_data is None:
                 self.logger.error("[AgentOracle] ❌ Inference failed, skipping task submission")
                 return
             
             # Log inference results
+            inf_status = inference_data.get("status", "submitted")
+            inf_signals = inference_data.get("signals", [])
             self.logger.info("[AgentOracle] ========================================")
-            self.logger.info("[AgentOracle] ✅ 推理完成:")  # Inference Complete
-            self.logger.info(f"[AgentOracle]   - 概率: {prediction_data.get('probability', prediction_data.get('confidence', 0)):.2f}")  # Probability
-            self.logger.info(f"[AgentOracle]   - 理由: {prediction_data.get('rationale', prediction_data.get('prediction', 'N/A'))[:100]}...")  # Rationale
-            self.logger.info(f"[AgentOracle]   - 证据类型: {prediction_data.get('evidence_type', 'N/A')}")  # Evidence Type
+            self.logger.info(f"[AgentOracle] ✅ 数据因子搜集完成: status={inf_status}, 因子数={len(inf_signals)}")
+            for i, sig in enumerate(inf_signals):
+                self.logger.info(f"[AgentOracle]   因子[{i}]: type={sig.get('evidence_type','N/A')}, exclusivity={sig.get('data_exclusivity','N/A')}, text={sig.get('evidence_text','')[:80]}...")
             self.logger.info("[AgentOracle] ========================================")
             
-            # Validate prediction string lengths before sanitization
+            # ========== 【TEMP DEBUG】abstained 时发起二次请求，让 agent 模拟构造数据 ==========
+            # 阶段2：如果 agent 在第一次真实尝试后弃权，发起第二次请求，
+            # 使用专门的 mock 提示词，让 agent 自己根据任务信息合理构造模拟数据。
+            # 正式上线前移除此段，恢复下方注释的正式 abstained 提交逻辑。
+            if inf_status == "abstained":
+                abstain_reason = inference_data.get("abstain_reason", "no_relevant_data")
+                abstain_detail = inference_data.get("abstain_detail", "")
+                self.logger.warning("[AgentOracle] ⚠️ [MOCK-DEBUG] ============================================")
+                self.logger.warning(f"[AgentOracle] ⚠️ [MOCK-DEBUG] Agent 首轮返回 abstained")
+                self.logger.warning(f"[AgentOracle] ⚠️ [MOCK-DEBUG]   reason: {abstain_reason}")
+                self.logger.warning(f"[AgentOracle] ⚠️ [MOCK-DEBUG]   detail: {abstain_detail[:200]}")
+                self.logger.warning("[AgentOracle] ⚠️ [MOCK-DEBUG] 发起二次请求，让 agent 模拟构造数据...")
+                self.logger.warning("[AgentOracle] ⚠️ [MOCK-DEBUG] ============================================")
+                
+                try:
+                    mock_prompt = self._build_mock_signal_prompt(question, keywords, abstain_reason, abstain_detail)
+                    self.logger.info(f"[AgentOracle] [MOCK-DEBUG] 📝 Mock 提示词长度: {len(mock_prompt)} 字符")
+                    self.logger.info("[AgentOracle] [MOCK-DEBUG] 📤 发送 mock 请求到 OpenClaw Gateway...")
+                    mock_response = self.ws_client.send_message_sync(mock_prompt)
+                    
+                    if mock_response is None:
+                        self.logger.error("[AgentOracle] [MOCK-DEBUG] ❌ Mock 请求通信失败，提交原始 abstained")
+                        payload = {
+                            "task_id": task_id,
+                            "status": "abstained",
+                            "abstain_reason": abstain_reason,
+                            "abstain_detail": abstain_detail,
+                            "privacy_cleared": True,
+                            "protocol_version": "3.0",
+                        }
+                        self.api_client.submit_result(payload)
+                        return
+                    
+                    self.logger.info(f"[AgentOracle] [MOCK-DEBUG] 📥 Mock 响应长度: {len(mock_response)} 字符")
+                    print("\n" + "="*60)
+                    print("📝 [MOCK-DEBUG] AI 模拟构造结果:")
+                    print("="*60)
+                    print(mock_response)
+                    print("="*60 + "\n")
+                    
+                    mock_parsed = self._parse_inference_response(mock_response)
+                    if mock_parsed is None or mock_parsed.get("status") == "abstained" or not mock_parsed.get("signals"):
+                        self.logger.error("[AgentOracle] [MOCK-DEBUG] ❌ Mock 响应解析失败或仍为 abstained，提交原始 abstained")
+                        payload = {
+                            "task_id": task_id,
+                            "status": "abstained",
+                            "abstain_reason": abstain_reason,
+                            "abstain_detail": abstain_detail,
+                            "privacy_cleared": True,
+                            "protocol_version": "3.0",
+                        }
+                        self.api_client.submit_result(payload)
+                        return
+                    
+                    # 给 mock 生成的每条信号打上 [MOCK-DEBUG] 标签，便于后端识别
+                    for sig in mock_parsed.get("signals", []):
+                        src_desc = sig.get("source_description", "")
+                        if "[MOCK-DEBUG]" not in src_desc:
+                            sig["source_description"] = f"[MOCK-DEBUG] {src_desc}".strip()
+                    
+                    inference_data = mock_parsed
+                    inf_status = "submitted"
+                    inf_signals = inference_data["signals"]
+                    self.logger.info(f"[AgentOracle] [MOCK-DEBUG] ✅ Agent 成功模拟构造 {len(inf_signals)} 条信号，继续正常提交流程")
+                except Exception as mock_err:
+                    self.logger.error(f"[AgentOracle] [MOCK-DEBUG] 二次请求异常: {mock_err}", exc_info=True)
+                    return
+            
+            # ---- 正式模式的 abstained 提交（调试期已被上方 mock 逻辑覆盖）----
+            # if inf_status == "abstained":
+            #     self.logger.info(f"[AgentOracle] Agent 弃权: reason={inference_data.get('abstain_reason','N/A')}")
+            #     try:
+            #         payload = {
+            #             "task_id": task_id,
+            #             "status": "abstained",
+            #             "abstain_reason": inference_data.get("abstain_reason", "no_relevant_data"),
+            #             "abstain_detail": inference_data.get("abstain_detail", ""),
+            #             "privacy_cleared": True,
+            #             "protocol_version": "3.0",
+            #         }
+            #         self.api_client.submit_result(payload)
+            #     except Exception as e:
+            #         self.logger.error(f"[AgentOracle] Error submitting abstain: {e}", exc_info=True)
+            #     return
+            # ========== END TEMP DEBUG ==========
+            
+            # Validate submission string lengths before sanitization
             try:
-                if not self.string_validator.validate_prediction_strings(prediction_data):
-                    self.logger.error("[AgentOracle] Prediction data failed string length validation, skipping task submission")
+                if not self.string_validator.validate_submission_strings(inference_data):
+                    self.logger.error("[AgentOracle] Submission data failed string length validation, skipping task submission")
                     return
             except Exception as e:
-                self.logger.error(f"[AgentOracle] Error validating prediction strings: {e}", exc_info=True)
+                self.logger.error(f"[AgentOracle] Error validating submission strings: {e}", exc_info=True)
                 return
             
             # Collect all telemetry data
@@ -1070,41 +1093,80 @@ class BackgroundDaemon:
                     "inference_latency_ms": 0.0
                 }
             
-            # Sanitize prediction data to remove PII
+            # Sanitize submission data to remove PII
             try:
-                sanitized_prediction = self.sanitizer.sanitize_prediction(prediction_data)
+                sanitized_submission = self.sanitizer.sanitize_submission(inference_data)
             except Exception as e:
-                self.logger.error(f"[AgentOracle] Error sanitizing prediction: {e}", exc_info=True)
+                self.logger.error(f"[AgentOracle] Error sanitizing submission: {e}", exc_info=True)
                 # Use unsanitized data as fallback (better than failing completely)
-                sanitized_prediction = prediction_data
+                sanitized_submission = inference_data
             
-            # Build prediction payload (platform /api/agent/predictions format)
+            # Build v3.0 signal submission payload (platform /api/agent/signals format)
             try:
-                payload = {
-                    "taskId": task_id,
-                    "probability": sanitized_prediction.get("probability", sanitized_prediction.get("confidence", 0.5)),
-                    "rationale": sanitized_prediction.get("rationale", sanitized_prediction.get("reasoning", "")),
-                }
+                now_iso = datetime.now().isoformat() + "Z"
                 
-                # Add optional structured signal fields
-                if sanitized_prediction.get("evidence_type"):
-                    payload["evidence_type"] = sanitized_prediction["evidence_type"]
-                if sanitized_prediction.get("evidence_text"):
-                    payload["evidence_text"] = sanitized_prediction["evidence_text"]
-                if sanitized_prediction.get("relevance_score") is not None:
-                    payload["relevance_score"] = sanitized_prediction["relevance_score"]
-                if sanitized_prediction.get("entity_tags"):
-                    payload["entity_tags"] = sanitized_prediction["entity_tags"]
-                if sanitized_prediction.get("source_urls"):
-                    payload["source_url"] = sanitized_prediction["source_urls"][0] if isinstance(sanitized_prediction["source_urls"], list) else sanitized_prediction["source_urls"]
-                elif sanitized_prediction.get("source_url"):
-                    payload["source_url"] = sanitized_prediction["source_url"]
+                # UAP v3.0 运维字段：plugin_version 从 package __version__ 取，model_name 从 config 取
+                try:
+                    from . import __version__ as _plugin_ver
+                except ImportError:
+                    try:
+                        from __init__ import __version__ as _plugin_ver  # type: ignore
+                    except Exception:
+                        _plugin_ver = "unknown"
+                _plugin_version = f"openclaw_agentoracle_plugin/{_plugin_ver}"
+                _model_name = self.config.get("agent_model") or "openclaw-gateway"
+                
+                def _build_uap_payload(source: Dict[str, Any]) -> Dict[str, Any]:
+                    """基于 source（inference 结果）构建一份完整的 UAP v3.0 提交 payload"""
+                    src_signals = source.get("signals", []) or []
+                    built_signals = []
+                    for idx, sig in enumerate(src_signals):
+                        signal = dict(sig)
+                        if not signal.get("signal_id"):
+                            signal["signal_id"] = f"sig_{task_id[:8]}_{int(datetime.now().timestamp())}_{idx}"
+                        if not signal.get("observed_at"):
+                            signal["observed_at"] = now_iso
+                        built_signals.append(signal)
+                    built = {
+                        "task_id": task_id,
+                        "status": source.get("status", "submitted"),
+                        "signals": built_signals,
+                        "privacy_cleared": True,
+                        "protocol_version": "3.0",
+                        "model_name": _model_name,
+                        "plugin_version": _plugin_version,
+                    }
+                    if source.get("user_persona"):
+                        built["user_persona"] = source["user_persona"]
+                    # 弃权字段（协议 §4.3）
+                    if source.get("status") == "abstained":
+                        if source.get("abstain_reason"):
+                            built["abstain_reason"] = source["abstain_reason"]
+                        if source.get("abstain_detail"):
+                            built["abstain_detail"] = source["abstain_detail"]
+                    return built
+                
+                # 原始 UAP v3.0 payload（未脱敏，用于提交记录对比）
+                original_payload = _build_uap_payload(inference_data)
+                # 最终 UAP v3.0 payload（脱敏后，实际提交给平台）
+                payload = _build_uap_payload(sanitized_submission)
+                signals_payload = payload["signals"]
                 
                 self.logger.info("[AgentOracle] ========================================")
-                self.logger.info("[AgentOracle] 📤 正在提交预测:")  # Submitting Prediction
-                self.logger.info(f"[AgentOracle]   - 市场 ID: {task_id}")  # Market ID
-                self.logger.info(f"[AgentOracle]   - 概率: {payload['probability']:.2f}")  # Probability
-                self.logger.info(f"[AgentOracle]   - 分析理由: {payload['rationale'][:100]}...")  # Rationale
+                self.logger.info("[AgentOracle] 📤 正在提交信号数据:")
+                self.logger.info(f"[AgentOracle]   - 任务 ID: {task_id}")
+                self.logger.info(f"[AgentOracle]   - 信号数: {len(signals_payload)}")
+                for i, sig in enumerate(signals_payload):
+                    self.logger.info(f"[AgentOracle]   - 因子[{i}]: {sig.get('evidence_type','N/A')} | {sig.get('data_exclusivity','N/A')} | {sig.get('evidence_text','')[:80]}...")
+                # 【UAP v3.0 调试】打印完整的请求 JSON
+                try:
+                    import json as _json_dbg
+                    full_json = _json_dbg.dumps(payload, ensure_ascii=False, indent=2)
+                    self.logger.info("[AgentOracle] 📦 完整提交 JSON (UAP v3.0):")
+                    for line in full_json.split("\n"):
+                        self.logger.info(f"[AgentOracle] | {line}")
+                except Exception as _dbg_err:
+                    self.logger.warning(f"[AgentOracle] 打印完整 payload 失败: {_dbg_err}")
                 self.logger.info("[AgentOracle] ========================================")
                 
             except Exception as e:
@@ -1115,14 +1177,14 @@ class BackgroundDaemon:
             try:
                 success = self.api_client.submit_result(payload)
                 
-                # Log submission to local file
+                # Log submission to local file —— 记录的是最终 UAP v3.0 提交数据
                 try:
                     self.submission_logger.log_submission(
                         task_id=task_id,
                         task_title=title,
                         question=question,
-                        original_prediction=prediction_data,
-                        sanitized_prediction=sanitized_prediction,
+                        original_submission=original_payload,   # 未脱敏的 UAP v3.0 payload
+                        sanitized_submission=payload,            # 实际提交的 UAP v3.0 payload
                         telemetry_data=telemetry_data,
                         success=success
                     )
@@ -1143,8 +1205,7 @@ class BackgroundDaemon:
                                 'task_id': task_id,
                                 'id': task_id,
                                 'title': title,
-                                'probability': prediction_data.get('probability', prediction_data.get('confidence', 0)),
-                                'confidence': prediction_data.get('probability', prediction_data.get('confidence', 0)),
+                                'evidence_type': inference_data.get('evidence_type', 'N/A'),
                                 'status': '成功'
                             }
                             self.on_task_complete(task_data)
@@ -1163,8 +1224,7 @@ class BackgroundDaemon:
                                 'task_id': task_id,
                                 'id': task_id,
                                 'title': title,
-                                'probability': prediction_data.get('probability', prediction_data.get('confidence', 0)),
-                                'confidence': prediction_data.get('probability', prediction_data.get('confidence', 0)),
+                                'evidence_type': inference_data.get('evidence_type', 'N/A'),
                                 'status': '失败'
                             }
                             self.on_task_complete(task_data)
@@ -1173,14 +1233,14 @@ class BackgroundDaemon:
             except Exception as e:
                 self.logger.error(f"[AgentOracle] Error submitting result: {e}", exc_info=True)
                 
-                # Log failed submission
+                # Log failed submission —— 记录的是最终 UAP v3.0 提交数据
                 try:
                     self.submission_logger.log_submission(
                         task_id=task_id,
                         task_title=title,
                         question=question,
-                        original_prediction=prediction_data,
-                        sanitized_prediction=sanitized_prediction,
+                        original_submission=original_payload,   # 未脱敏的 UAP v3.0 payload
+                        sanitized_submission=payload,            # 实际提交的 UAP v3.0 payload
                         telemetry_data=telemetry_data,
                         success=False
                     )
@@ -1198,14 +1258,14 @@ class BackgroundDaemon:
         to ensure it contains all required fields.
 
         Args:
-            question: Prediction question text. Must be non-empty string.
+            question: Task question text. Must be non-empty string.
             keywords: List of keyword strings to provide context. Can be empty.
 
         Returns:
             Dictionary containing:
-            - prediction: Prediction answer text (string)
-            - confidence: Confidence score 0.0-1.0 (float)
-            - reasoning: Explanation of the prediction (string)
+            - rationale: Analysis rationale text (string)
+            - evidence_type: Type of evidence (string)
+            - reasoning: Full analysis text (string)
 
             Returns None if inference fails or validation fails.
         """
@@ -1218,7 +1278,9 @@ class BackgroundDaemon:
                 self.logger.error("[AgentOracle] Invalid question field in task")
                 return None
 
-            if not isinstance(keywords, list):
+            if keywords is None:
+                keywords = []
+            elif not isinstance(keywords, list):
                 self.logger.error("[AgentOracle] Invalid keywords field in task")
                 return None
 
@@ -1236,8 +1298,8 @@ class BackgroundDaemon:
                 except Exception as e:
                     self.logger.debug(f"[AgentOracle] 更新 GUI 状态失败: {e}")
 
-            # Build prediction prompt
-            prompt = self._build_prediction_prompt(question, keywords)
+            # Build analysis prompt
+            prompt = self._build_analysis_prompt(question, keywords)
 
             # Log prompt length for debugging
             self.logger.info(f"[AgentOracle] 📝 Prompt 长度: {len(prompt)} 字符")
@@ -1256,7 +1318,7 @@ class BackgroundDaemon:
                 self.logger.debug(f"[AgentOracle] 保存 prompt 失败: {e}")
 
             # Send message via WebSocket and get response
-            self.logger.info("[AgentOracle] 📤 发送预测任务到 OpenClaw Gateway...")
+            self.logger.info("[AgentOracle] 📤 发送分析任务到 OpenClaw Gateway...")
             response_text = self.ws_client.send_message_sync(prompt)
 
             # Update GUI tray back to idle state
@@ -1281,24 +1343,24 @@ class BackgroundDaemon:
             print(response_text)
             print("="*60 + "\n")
             
-            # Save complete response to predictions folder (like daily_elf)
+            # Save complete response to submissions folder (like daily_elf)
             try:
-                predictions_dir = Path("./predictions")
-                predictions_dir.mkdir(exist_ok=True)
+                submissions_dir = Path("./submissions")
+                submissions_dir.mkdir(exist_ok=True)
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                prediction_file = predictions_dir / f"prediction_{timestamp}.md"
+                submission_file = submissions_dir / f"submission_{timestamp}.md"
                 
-                with open(prediction_file, "w", encoding="utf-8") as f:
-                    f.write(f"# AgentOracle 预测分析\n\n")
+                with open(submission_file, "w", encoding="utf-8") as f:
+                    f.write(f"# AgentOracle 信号分析\n\n")
                     f.write(f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
                     f.write(f"## 任务问题\n{question}\n\n")
                     if keywords:
                         f.write(f"## 关键词\n{', '.join(keywords)}\n\n")
                     f.write(f"## AI 分析结果\n{response_text}\n")
                 
-                self.logger.info(f"[AgentOracle] 💾 完整预测已保存到: {prediction_file}")
+                self.logger.info(f"[AgentOracle] 💾 完整分析已保存到: {submission_file}")
             except Exception as e:
-                self.logger.debug(f"[AgentOracle] 保存预测文件失败: {e}")
+                self.logger.debug(f"[AgentOracle] 保存分析文件失败: {e}")
             
             # Save response to debug folder for debugging (optional, can be disabled in production)
             try:
@@ -1312,16 +1374,16 @@ class BackgroundDaemon:
             except Exception as e:
                 self.logger.debug(f"[AgentOracle] 保存响应失败: {e}")
 
-            # Parse response to extract prediction data
-            prediction_data = self._parse_prediction_response(response_text)
+            # Parse response to extract structured signal data
+            inference_data = self._parse_inference_response(response_text)
 
-            if prediction_data is None:
+            if inference_data is None:
                 self.logger.error("[AgentOracle] 无法解析 Agent 响应")
                 return None
 
-            self.logger.info(f"[AgentOracle] Inference completed successfully (confidence: {prediction_data.get('confidence', 0)})")
+            self.logger.info(f"[AgentOracle] Inference completed successfully (evidence_type: {inference_data.get('evidence_type', 'N/A')})")
 
-            return prediction_data
+            return inference_data
 
         except Exception as e:
             # Update GUI tray back to idle state on error
@@ -1335,222 +1397,351 @@ class BackgroundDaemon:
             self.logger.error(f"[AgentOracle] Inference failed: {e}", exc_info=True)
             return None
 
-    def _build_prediction_prompt(self, question: str, keywords: list) -> str:
-        """Build prediction task prompt for OpenClaw Agent (same format as daily_elf)."""
+    def _build_analysis_prompt(self, question: str, keywords: list) -> str:
+        """Build analysis task prompt for OpenClaw Agent (same format as daily_elf)."""
         from datetime import datetime
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         keywords_str = ", ".join(keywords) if keywords else "无"
 
-        prompt = f"""【智能预测任务】{now}
+        prompt = f"""【数据因子构造任务】{now}
 
-你是一位资深的预测分析专家。请充分利用你的所有工具和能力来完成以下预测任务。
+## 你的角色
+
+你是一个数据因子构造器（Data Factor Sensor）。
+
+你的职责：
+- 从你能访问的所有数据中，构造与任务相关的**数据因子**（原始事实）
+- 对每个因子解释**为什么与任务相关**
+- 尽量**量化**数据因子
+- 提交 **3-5 条高质量**数据因子，远好于 10 条低质量的。宁缺毋滥
+- 同一主题的多条相似数据**合并为一条**（可注明出现次数），不要重复提交
+
+你**绝对不做**的事情：
+- ❌ 不输出概率（probability）
+- ❌ 不做预测判断或结论（如"因此我认为..."、"综合来看..."）
+- ❌ 不对任务结果给出方向性意见
 
 **重要：请使用中文进行分析和回复。**
 
-## 任务描述
+---
+
+## 任务
+
 {question}
 
-## 关键词
-{keywords_str}
-
-## 信息收集要求（请使用你的所有工具）
-
-### 1. 本地信息获取
-- 自行查找创建的所有建立的记忆相关文件或者内容
-- 使用**记忆检索工具**查找所有相关的历史记忆和交互记录
-- 检索与任务相关的本地知识库、文档、笔记
-- 查找历史对话中的相关讨论和结论
-
-### 2. 用户画像分析
-- 分析用户的历史行为模式和偏好
-- 总结用户的专业领域和兴趣方向
-- 识别用户的决策风格和关注重点
-
-### 3. 互联网信息检索
-- 使用**网络搜索工具**查找最新的行业动态和趋势
-- 搜索相关的新闻、报告、研究成果
-- 获取市场数据、统计信息、专家观点
-
-### 4. 历史数据分析
-- 检索相关的历史数据和时间序列信息
-- 分析过去的趋势和模式
-- 识别周期性规律和异常事件
-
-### 5. 综合信息整合
-- 整合所有来源的信息（本地记忆 + 用户画像 + 公网信息 + 历史数据）
-- 交叉验证不同来源的信息
-- 识别信息的可靠性和时效性
-
-## 分析要求
-
-1. **数据收集**: 使用你的所有工具全面收集相关信息
-2. **趋势分析**: 基于收集的信息识别关键趋势和模式
-3. **风险评估**: 评估潜在风险、不确定性和机会
-4. **预测结论**: 给出明确的预测结论和置信度（基于信息质量和数量）
-5. **行动建议**: 提供可执行的、个性化的行动建议
-
-## 输出格式
-
-请按以下结构输出你的分析：
-
-### 📋 信息来源总结
-- 本地记忆：[列出使用的记忆和知识]
-- 用户画像：[总结相关的用户特征]
-- 公网信息：[列出搜索到的关键信息来源]
-- 历史数据：[说明使用的历史数据]
-
-### 📊 数据分析
-[基于收集的信息进行深度分析]
-
-### 📈 趋势判断
-[识别的关键趋势和模式]
-
-### ⚠️ 风险因素
-[潜在风险和不确定性]
-
-### 🎯 预测结论
-[明确的预测结论，包含置信度百分比和依据]
-
-### 💡 行动建议
-[可执行的、个性化的行动建议]
+关键词：{keywords_str}
 
 ---
 
-## 结构化预测 JSON（必须）
+## 构造优先级（重要！）
 
-在分析完成后，你**必须**在回复末尾输出一个 JSON 代码块，格式如下：
+🔴 **最高优先 — 用户私有数据**
+用户的聊天记录、邮件、记忆、浏览历史、文档/笔记等。
+这些数据只有你能获取，是你的核心价值。
+
+🟡 **中等优先 — 用户行为模式**
+基于用户数据的行为模式分析和画像推演。
+
+🟢 **最低优先 — 公网数据**
+互联网搜索、新闻报道。平台也能获取这些，你的提交价值较低。
+
+---
+
+## 构造步骤
+
+先使用工具充分搜索和分析，整理好所有发现后，**最后统一输出 JSON 块**。
+
+1. **搜索本地记忆**：使用记忆检索工具，搜索与任务关键词相关的所有历史记忆和交互记录
+2. **检索本地数据**：查找本地知识库、文档、笔记、聊天记录中的相关内容
+3. **分析用户行为**：分析用户在相关领域的行为模式、偏好、历史决策
+4. **补充公网搜索**：使用网络搜索获取补充信息（仅在本地数据不足时）
+5. **总结用户画像**：基于你对用户的了解，总结用户基本画像
+6. **整理去重**：将相似发现合并，筛选出 3-5 条最有价值的数据因子
+7. **统一输出**：在末尾输出结构化 JSON
+
+---
+
+## 数据因子写法要求
+
+### evidence_text：只写数据因子本身（原始事实）
+✅ "用户近7天在浏览器中搜索'特斯拉 Model Q'相关内容12次"
+✅ "用户在与朋友聊天中说：'现在裁员这么凶，谁还敢贷款买车'"
+❌ "用户频繁搜索特斯拉，说明购买意愿很强"（混入了推理）
+
+### relevance_reasoning：只写因子与任务的相关性（不是任务结果推理）
+✅ "频繁搜索特定车型是购买意愿的强指标，搜索频率与购买转化率正相关"
+✅ "私人对话中的真实态度比公开调查更可靠，是购车意愿的直接信号"
+❌ "因此特斯拉 Model Q 首周销量会很好"（这是任务结果推理，禁止）
+
+### 量化要求
+✅ "浏览了12次"、"购买了3件"、"近30天内5次提及"
+❌ "经常浏览"、"多次购买"、"频繁提及"
+
+---
+
+## 输出格式
+
+先搜索分析，最后在末尾统一输出 JSON 块（用 ```json ``` 包裹）。
+
+### 找到相关数据时：
 
 ```json
 {{
-  "probability": 0.75,
-  "rationale": "简要总结你的预测理由（1-3句话）",
-  "evidence_type": "hard_fact",
-  "evidence_text": "支持预测的关键证据摘要",
-  "relevance_score": 0.8,
-  "source_urls": ["https://example.com/source1"],
-  "entity_tags": [{{"text": "关键实体", "type": "topic", "role": "subject"}}]
+  "status": "submitted",
+  "signals": [
+    {{
+      "signal_id": "sig_a1b2c3",
+      "evidence_type": "hard_fact 或 persona_inference",
+      "source_type": "数据来源类型",
+      "data_exclusivity": "private 或 semi_private 或 public",
+      "source_description": "来源简要描述",
+      "observed_at": "证据时间（ISO 8601，不确定则省略此字段）",
+      "evidence_text": "数据因子本身（原始事实，尽量量化）",
+      "relevance_reasoning": "为什么这个因子与任务相关",
+      "relevance_score": 0.9,
+      "source_urls": [],
+      "entity_tags": [
+        {{ "text": "实体名", "type": "类型", "role": "角色" }}
+      ]
+    }}
+  ],
+  "user_persona": {{
+    "occupation": "职业",
+    "age_range": "年龄段",
+    "region": "地区",
+    "interests": ["兴趣1", "兴趣2"]
+  }}
 }}
 ```
 
-字段说明：
-- **probability**: 0.0-1.0 之间的概率值，表示预测为"是/正面"的可能性
-- **rationale**: 预测理由的简要总结
-- **evidence_type**: "hard_fact"（硬事实）、"soft_signal"（软信号）或 "personal_opinion"（个人观点）
-- **evidence_text**: 关键证据的简要描述（可选）
-- **relevance_score**: 0.0-1.0 之间的相关性评分
-- **source_urls**: 信息来源 URL 列表（可选）
-- **entity_tags**: 关键实体标签数组（可选）
+> **user_persona 提示**：只填你了解的字段，不确定的字段直接省略，不要编造。
 
-**重要提示**: 
-1. 请充分使用你的所有工具和能力，不要局限于已有知识。主动搜索、检索、分析，提供最全面和准确的预测。
-2. 请使用中文输出所有分析内容。
-3. **必须**在回复末尾输出上述 JSON 代码块，这是提交预测到平台所必需的。
+### 没有找到任何相关数据时：
 
-请开始你的专业分析。"""
+```json
+{{
+  "status": "abstained",
+  "abstain_reason": "no_relevant_data",
+  "abstain_detail": "说明搜索了哪些数据源但未找到相关内容"
+}}
+```
+
+### 字段参考
+
+**evidence_type**: `hard_fact`（直接证据：聊天记录、记忆、新闻事实等）| `persona_inference`（画像推演：基于用户行为模式推断）
+
+**source_type**: `local_chat` | `local_email` | `local_document` | `local_transaction` | `local_browsing` | `local_memory` | `web_search` | `web_news` | `user_profile` | `behavior_pattern` | `other`
+
+**data_exclusivity**: `private`（用户私有数据）| `semi_private`（行为模式推演）| `public`（公网数据）
+
+**entity_tags type**: `brand` | `person` | `org` | `event` | `trend` | `behavior` | `sentiment` | `metric` | `location` | `policy` | `technology`
+
+**entity_tags role**: `target` | `cause` | `indicator` | `context` | `negative_intent` | `positive_intent` | `source`
+
+---
+
+📌 任务来源：AgentOracle 数据因子构造平台
+🌐 平台地址：https://agentoracle.xyz"""
 
         return prompt
 
-    def _parse_prediction_response(self, response_text: str) -> Optional[Dict[str, Any]]:
-        """Parse agent response to extract structured prediction data.
+
+
+#模拟数据步骤
+    def _build_mock_signal_prompt(self, question: str, keywords: list, abstain_reason: str, abstain_detail: str) -> str:
+        """【TEMP DEBUG】构建二次请求的 mock 提示词。
+        
+        当 agent 第一次尝试后返回 abstained，调用此方法构建新的提示词，
+        明确告知 agent：上一轮弃权了，现在处于调试阶段，需要基于任务信息
+        合理构造 1-3 条模拟数据因子以验证端到端链路。
+        
+        注意：此方法仅用于联调调试，正式上线前可删除。
+        """
+        from datetime import datetime
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        keywords_str = ", ".join(keywords) if keywords else "无"
+
+        return f"""【MOCK-DEBUG：二次请求 — 模拟数据构造】{now}
+
+## 背景说明
+
+你在刚才的第一轮任务中返回了 `abstained`（弃权）。
+
+- 弃权原因：`{abstain_reason}`
+- 弃权详情：{abstain_detail[:300] if abstain_detail else '(无)'}
+
+你的判断是合理的——在真实数据中确实找不到直接相关信息。
+
+---
+
+## 当前任务（调试模式）
+
+**我们现在正处于端到端数据流调试阶段**，需要验证提交链路的完整性。
+
+因此这一轮，请你**暂时放下"不做虚构"的原则**，基于任务本身的信息，**合理构造 1-3 条模拟数据因子**。
+
+这些数据因子不会被当作真实用户数据使用，仅用于验证平台的接收、解析、存储链路。
+
+---
+
+## 原任务信息
+
+- **问题**：{question}
+- **关键词**：{keywords_str}
+
+---
+
+## 构造要求
+
+1. 基于任务主题和关键词，推演一个"假想用户"可能有的相关行为/兴趣/历史
+2. 构造 1-3 条合理的数据因子，**不要凭空编造完全离谱的内容**
+3. 每条数据因子必须：
+   - `evidence_type` 设为 `persona_inference`（画像推演）
+   - `data_exclusivity` 设为 `semi_private`（行为模式推演）
+   - `source_description` 必须以 **`[MOCK-DEBUG]`** 开头（平台依据此标记清理）
+   - `evidence_text` 写成假想用户的具体行为描述，尽量量化
+   - `relevance_reasoning` 解释该因子与任务的相关性（不是任务结果推理）
+4. 可选填写 `user_persona`（假想用户画像）
+
+---
+
+## 输出格式
+
+**必须**在回复末尾输出一个 `status: "submitted"` 的 JSON 块：
+
+```json
+{{
+  "status": "submitted",
+  "signals": [
+    {{
+      "signal_id": "sig_mock_xxxxxx",
+      "evidence_type": "persona_inference",
+      "source_type": "behavior_pattern",
+      "data_exclusivity": "semi_private",
+      "source_description": "[MOCK-DEBUG] 调试模拟：xxx",
+      "observed_at": "2026-04-17T00:00:00Z",
+      "evidence_text": "假想用户的具体、量化的行为描述",
+      "relevance_reasoning": "该因子为什么与任务相关",
+      "relevance_score": 0.5,
+      "source_urls": [],
+      "entity_tags": [
+        {{ "text": "关键实体", "type": "topic", "role": "context" }}
+      ]
+    }}
+  ],
+  "user_persona": {{
+    "interests": ["根据任务推演的兴趣"]
+  }}
+}}
+```
+
+**严禁**这一轮再返回 `abstained`。
+
+📌 此为调试请求，请直接输出 JSON。"""
+
+    def _parse_inference_response(self, response_text: str) -> Optional[Dict[str, Any]]:
+        """Parse agent response to extract structured signal data.
         
         First tries to extract a JSON code block (```json ... ```), then
-        falls back to heuristic text parsing for probability and rationale.
+        falls back to heuristic text parsing for rationale and evidence.
         """
         try:
             import re
             import json as json_module
-            
+
+            # evidence_type 合法值映射
+            ef_type_map = {
+                "hard_fact": "hard_fact",
+                "soft_signal": "persona_inference",
+                "personal_opinion": "persona_inference",
+                "persona_inference": "persona_inference",
+            }
+
+            def _normalize_signal(sig: dict) -> dict:
+                """将单条 signal 标准化为 UAP v3.0 格式"""
+                return {
+                    "evidence_type": ef_type_map.get(sig.get("evidence_type", ""), "persona_inference"),
+                    "source_type": sig.get("source_type", "llm_analysis"),
+                    "data_exclusivity": sig.get("data_exclusivity", "public"),
+                    "source_description": sig.get("source_description", ""),
+                    "observed_at": sig.get("observed_at", ""),
+                    "evidence_text": sig.get("evidence_text", ""),
+                    "relevance_reasoning": sig.get("relevance_reasoning", ""),
+                    "relevance_score": max(0.0, min(1.0, float(sig.get("relevance_score", 0.5)))),
+                    "source_urls": sig.get("source_urls", []) if isinstance(sig.get("source_urls"), list) else [],
+                    "entity_tags": sig.get("entity_tags", []) if isinstance(sig.get("entity_tags"), list) else [],
+                }
+
             # === Strategy 1: Extract JSON code block ===
             json_block_match = re.search(r'```json\s*\n?(.*?)\n?\s*```', response_text, re.DOTALL)
             if json_block_match:
                 try:
                     parsed = json_module.loads(json_block_match.group(1).strip())
-                    
-                    # Validate required fields
-                    probability = float(parsed.get("probability", 0.5))
-                    probability = max(0.0, min(1.0, probability))
-                    
-                    rationale = parsed.get("rationale", "")
-                    if not rationale:
-                        # Try to extract from 预测结论 section as fallback
-                        conclusion_match = re.search(r'###\s*🎯\s*预测结论\s*\n(.*?)(?=\n###|\n---|\Z)', response_text, re.DOTALL)
-                        rationale = conclusion_match.group(1).strip() if conclusion_match else response_text[:500]
-                    
-                    result = {
-                        "probability": probability,
-                        "rationale": rationale,
-                        "confidence": probability,  # backward compat
-                        "prediction": rationale,     # backward compat
-                        "reasoning": response_text,  # full text for logging
-                    }
-                    
-                    # Optional structured signal fields
-                    # Map LLM evidence_type to valid platform API types: 'hard_fact' | 'persona_inference'
-                    if parsed.get("evidence_type"):
-                        ef_type_map = {
-                            "hard_fact": "hard_fact",
-                            "soft_signal": "persona_inference",
-                            "personal_opinion": "persona_inference",
-                            "persona_inference": "persona_inference",
+                    status = parsed.get("status", "submitted")
+
+                    # --- UAP v3.0: abstained ---
+                    if status == "abstained":
+                        self.logger.info(f"[AgentOracle] ✅ Agent 弃权: reason={parsed.get('abstain_reason', 'N/A')}")
+                        return {
+                            "status": "abstained",
+                            "abstain_reason": parsed.get("abstain_reason", "no_relevant_data"),
+                            "abstain_detail": parsed.get("abstain_detail", ""),
+                            "reasoning": response_text,
                         }
-                        mapped = ef_type_map.get(parsed["evidence_type"])
-                        if mapped:
-                            result["evidence_type"] = mapped
-                    if parsed.get("evidence_text"):
-                        result["evidence_text"] = str(parsed["evidence_text"])
-                    if parsed.get("relevance_score") is not None:
-                        result["relevance_score"] = max(0.0, min(1.0, float(parsed["relevance_score"])))
-                    if parsed.get("source_urls"):
-                        result["source_urls"] = parsed["source_urls"] if isinstance(parsed["source_urls"], list) else [parsed["source_urls"]]
-                    if parsed.get("entity_tags"):
-                        result["entity_tags"] = parsed["entity_tags"] if isinstance(parsed["entity_tags"], list) else []
-                    
-                    self.logger.info(f"[AgentOracle] ✅ JSON 解析成功: probability={probability:.2f}")
-                    return result
-                    
+
+                    # --- UAP v3.0: submitted with signals array ---
+                    if isinstance(parsed.get("signals"), list) and len(parsed["signals"]) > 0:
+                        signals = [_normalize_signal(s) for s in parsed["signals"]]
+                        self.logger.info(f"[AgentOracle] ✅ JSON 解析成功 (UAP v3.0): {len(signals)} 个数据因子")
+                        for i, sig in enumerate(signals):
+                            self.logger.info(f"[AgentOracle]   因子[{i}]: type={sig['evidence_type']}, exclusivity={sig['data_exclusivity']}, score={sig['relevance_score']:.2f}, text={sig['evidence_text'][:60]}...")
+                        return {
+                            "status": "submitted",
+                            "signals": signals,
+                            "user_persona": parsed.get("user_persona"),
+                            "reasoning": response_text,
+                        }
+
+                    # --- 兼容旧格式：单个对象含 probability/rationale ---
+                    if parsed.get("probability") is not None or parsed.get("rationale"):
+                        self.logger.info("[AgentOracle] ⚠️ 检测到旧格式 (probability/rationale)，转换为 signals")
+                        return {
+                            "status": "submitted",
+                            "signals": [_normalize_signal({
+                                "evidence_type": parsed.get("evidence_type", "persona_inference"),
+                                "source_type": "llm_analysis",
+                                "data_exclusivity": "public",
+                                "source_description": "基于 LLM 分析推理",
+                                "evidence_text": parsed.get("evidence_text", parsed.get("rationale", "")),
+                                "relevance_reasoning": parsed.get("rationale", ""),
+                                "relevance_score": parsed.get("relevance_score", 0.5),
+                                "source_urls": parsed.get("source_urls", []),
+                                "entity_tags": parsed.get("entity_tags", []),
+                            })],
+                            "reasoning": response_text,
+                        }
+
                 except (json_module.JSONDecodeError, ValueError, TypeError) as e:
                     self.logger.warning(f"[AgentOracle] JSON 解析失败，回退到文本解析: {e}")
-            
+
             # === Strategy 2: Heuristic text parsing (fallback) ===
-            probability = 0.5
-            
-            confidence_patterns = [
-                r'probability["\s:]+\s*(\d+(?:\.\d+)?)',
-                r'置信度[：:]\s*(\d+(?:\.\d+)?)\s*%',
-                r'confidence[：:]\s*(\d+(?:\.\d+)?)\s*%',
-                r'置信度[：:]\s*(\d+(?:\.\d+)?)',
-                r'confidence[：:]\s*(\d+(?:\.\d+)?)',
-                r'(\d+(?:\.\d+)?)\s*%\s*(?:的概率|可能性|置信度)',
-            ]
-
-            for pattern in confidence_patterns:
-                match = re.search(pattern, response_text, re.IGNORECASE)
-                if match:
-                    conf_value = float(match.group(1))
-                    if conf_value > 1:
-                        probability = conf_value / 100.0
-                    else:
-                        probability = conf_value
-                    break
-
-            probability = max(0.0, min(1.0, probability))
-
-            # Extract prediction conclusion as rationale
-            rationale = response_text[:500]
-            prediction_match = re.search(r'###\s*🎯\s*预测结论\s*\n(.*?)(?=\n###|\n---|\Z)', response_text, re.DOTALL)
-            if prediction_match:
-                rationale = prediction_match.group(1).strip()
-
-            self.logger.info(f"[AgentOracle] ⚠️ 使用文本启发式解析: probability={probability:.2f}")
-            
+            self.logger.info("[AgentOracle] ⚠️ 未找到 JSON 块，使用文本启发式解析")
             return {
-                "probability": probability,
-                "rationale": rationale,
-                "confidence": probability,  # backward compat
-                "prediction": rationale,     # backward compat
-                "reasoning": response_text,  # full text for logging
-                "evidence_type": "personal_opinion",  # default for heuristic
+                "status": "submitted",
+                "signals": [{
+                    "evidence_type": "persona_inference",
+                    "source_type": "llm_analysis",
+                    "data_exclusivity": "public",
+                    "source_description": "基于 LLM 分析推理（文本解析 fallback）",
+                    "observed_at": "",
+                    "evidence_text": response_text[:500],
+                    "relevance_reasoning": "",
+                    "relevance_score": 0.3,
+                    "source_urls": [],
+                    "entity_tags": [],
+                }],
+                "reasoning": response_text,
             }
 
         except Exception as e:

@@ -2,13 +2,17 @@
   "id": "agentoracle-native",
   "name": "AgentOracle Native",
   "description": "Automated prediction task processing with privacy protection and WebSocket integration",
-  "autoload": true,
+  "autoload": false,
+  "entry": "./index.ts",
   "channels": [],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
       "api_key": {
+        "type": "string"
+      },
+      "api_base_url": {
         "type": "string"
       },
       "gateway_url": {
@@ -36,12 +40,16 @@
         "type": "number"
       }
     },
-    "required": ["api_key", "gateway_token"]
+    "required": ["api_key", "api_base_url", "gateway_token"]
   },
   "uiHints": {
     "api_key": {
       "label": "API Key",
       "help": "AgentOracle API key for authentication"
+    },
+    "api_base_url": {
+      "label": "API Base URL",
+      "help": "AgentOracle platform API base URL, e.g. https://your-platform-domain.com"
     },
     "gateway_url": {
       "label": "Gateway URL",

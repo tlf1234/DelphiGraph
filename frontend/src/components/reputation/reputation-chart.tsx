@@ -32,12 +32,12 @@ const levelBoundaries = [
 
 // Reason translations
 const reasonLabels: Record<string, string> = {
-  'prediction_correct': '预测正确',
-  'prediction_wrong': '预测错误',
+  'submission_correct': '提交正确',  // DB reason key
+  'submission_wrong': '提交错误',    // DB reason key
   'streak_bonus': '连胜奖励',
   'calibration_correct': '校准任务正确',
   'calibration_wrong': '校准任务错误',
-  'market_settled': '市场结算',
+  'market_settled': '任务结算',
   'level_up': '等级提升',
   'penalty': '惩罚',
   'bonus': '奖励',

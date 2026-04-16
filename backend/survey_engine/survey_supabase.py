@@ -15,15 +15,15 @@ class SurveySupabaseClient:
     def __init__(self, url: str, service_role_key: str):
         self._client: Client = create_client(url, service_role_key)
 
-    # ── surveys ───────────────────────────────────────────────────────
+    # ── survey_tasks ───────────────────────────────────────────────────────
 
     def create_survey(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        res = self._client.table("surveys").insert(data).execute()
+        res = self._client.table("survey_tasks").insert(data).execute()
         return res.data[0] if res.data else {}
 
     def get_survey(self, survey_id: str) -> Optional[Dict[str, Any]]:
         res = (
-            self._client.table("surveys")
+            self._client.table("survey_tasks")
             .select("*")
             .eq("id", survey_id)
             .maybe_single()
@@ -31,8 +31,8 @@ class SurveySupabaseClient:
         )
         return res.data
 
-    def list_surveys(self, creator_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
-        q = self._client.table("surveys").select("*").order("created_at", desc=True).limit(limit)
+    def list_survey_tasks(self, creator_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+        q = self._client.table("survey_tasks").select("*").order("created_at", desc=True).limit(limit)
         if creator_id:
             q = q.eq("creator_id", creator_id)
         return q.execute().data or []
@@ -50,7 +50,7 @@ class SurveySupabaseClient:
             payload["completed_at"] = datetime.now(timezone.utc).isoformat()
         if response_count is not None:
             payload["response_count"] = response_count
-        self._client.table("surveys").update(payload).eq("id", survey_id).execute()
+        self._client.table("survey_tasks").update(payload).eq("id", survey_id).execute()
 
     # ── survey_questions ──────────────────────────────────────────────
 

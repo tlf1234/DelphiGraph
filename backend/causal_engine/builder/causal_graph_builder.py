@@ -11,7 +11,8 @@
 """
 
 import logging
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+import math
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
 
 from ..models.causal_graph import (
     CausalEdge,
@@ -52,7 +53,7 @@ class CausalGraphBuilder:
         """
         graph = CausalGraph(
             task_id=ontology.task_id,
-            market_query=ontology.market_query,
+            task_query=ontology.task_query,
         )
         total_steps = 7
 
@@ -82,6 +83,10 @@ class CausalGraphBuilder:
         graph.edges = self._build_edges(ontology, graph.nodes)
         logger.info("Step 4: 构建 %d 条因果边", len(graph.edges))
 
+        # Step 4.5: 孤岛因子检测+自动补边修复
+        self._validate_factor_connectivity(graph)
+        self._repair_orphan_connectivity(graph)
+
         # Step 5: 绑定证据溯源
         if progress_callback:
             await progress_callback(5, total_steps, "绑定证据溯源...")
@@ -103,18 +108,51 @@ class CausalGraphBuilder:
         graph.hard_fact_count = preprocess_result.hard_fact_count
         graph.persona_count = preprocess_result.persona_count
 
-        # 设置预测目标节点 ID
+        # 设置分析目标节点 ID
         target_node = graph.get_target_node()
         if target_node:
-            graph.prediction_target_node_id = target_node.node_id
+            graph.analysis_target_node_id = target_node.node_id
 
+        # ── 构建结果详情日志 ──────────────────────────────────────────
+        cluster_lines = "\n".join(
+            f"    [{i+1}] {cn.theme!r}  signals={cn.signal_count}"
+            f"  hard={cn.hard_fact_count}  persona={cn.persona_count}"
+            f"  {'[少数派]' if cn.is_minority else ''}"
+            for i, cn in enumerate(graph.cluster_nodes)
+        )
+        factor_lines = "\n".join(
+            f"    [{i+1}] {'★' if n.is_analysis_target else ' '}"
+            f" {n.name!r}  [{n.category}]"
+            f"  impact={n.impact_score:.3f}  conf={n.confidence:.2f}"
+            f"  evid={n.total_evidence_count}(hard={n.hard_fact_count}/persona={n.persona_count})"
+            f"  dir={n.evidence_direction}"
+            for i, n in enumerate(sorted(graph.nodes, key=lambda x: x.impact_score, reverse=True))
+        )
+        _nid_map = {n.node_id: n.name for n in graph.nodes}
+        for cn in graph.cluster_nodes:
+            _nid_map[cn.cluster_id] = cn.theme
+        edge_lines = "\n".join(
+            f"    {_nid_map.get(e.source_node_id, e.source_node_id)!r}"
+            f" --{e.relation_type}({'+' if e.direction == 'positive' else '-'}"
+            f" w={e.weight:.3f})--> "
+            f"{_nid_map.get(e.target_node_id, e.target_node_id)!r}"
+            for e in graph.edges
+        )
         logger.info(
-            "5层因果图构建完成: %d 聚类, %d 因子, %d 聚类边, %d 因果边, graph_id=%s",
-            len(graph.cluster_nodes),
-            len(graph.nodes),
-            len(graph.cluster_edges),
-            len(graph.edges),
+            "\n── 因果图构建完成  graph_id=%s ──────────────────────────\n"
+            "  聚类节点 (%d):\n%s\n"
+            "  因子节点 (%d, 按影响力排序):\n%s\n"
+            "  因果边 (%d):\n%s\n"
+            "  聚类映射边: %d  |  总信号: %d  (hard=%d / persona=%d)\n"
+            "─────────────────────────────────────────────────────────",
             graph.graph_id,
+            len(graph.cluster_nodes), cluster_lines or "    (无)",
+            len(graph.nodes),        factor_lines or "    (无)",
+            len(graph.edges),        edge_lines   or "    (无)",
+            len(graph.cluster_edges),
+            graph.total_signals_used,
+            graph.hard_fact_count,
+            graph.persona_count,
         )
         return graph
 
@@ -180,7 +218,7 @@ class CausalGraphBuilder:
                 name=ft.name,
                 description=ft.description,
                 category=ft.category,
-                is_prediction_target=(ft.name == ontology.prediction_target),
+                is_analysis_target=(ft.name == ontology.analysis_target),
             )
             nodes.append(node)
         return nodes
@@ -228,14 +266,20 @@ class CausalGraphBuilder:
                 if not node or not ft.source_clusters:
                     continue
                 for sc_theme in ft.source_clusters:
-                    # 精确匹配
+                    # 1. 精确匹配
                     cluster = cluster_by_theme.get(sc_theme)
                     if cluster is None:
-                        # 模糊匹配：声明主题是聚类主题的子串或反之
+                        # 2. 子串匹配：声明主题是聚类主题的子串，或反之
+                        #    例: 声明 "Federal Reserve" 匹配到 "Federal Reserve rate policy signals"
                         for theme, c in cluster_by_theme.items():
                             if sc_theme in theme or theme in sc_theme:
                                 cluster = c
                                 break
+                    if cluster is None:
+                        logger.debug(
+                            "显式声明未匹配: 因子'%s' 声明的聚类'%s' 在当前聚类列表中找不到",
+                            ft.name, sc_theme,
+                        )
                     if cluster is not None:
                         score = cluster.avg_quality_score * cluster.relevance_score
                         _add_edge(cluster, node, score)
@@ -318,8 +362,14 @@ class CausalGraphBuilder:
             weight = self._compute_edge_weight(evidence_count, strength)
 
             # 根据关系类型确定方向
-            positive_types = {"DRIVES", "AMPLIFIES", "TRIGGERS"}
-            negative_types = {"INHIBITS", "MITIGATES"}
+            positive_types = {
+                "DRIVES", "AMPLIFIES", "TRIGGERS", "ENABLES",
+                "ACCELERATES", "REINFORCES", "SUPPORTS", "PROMOTES",
+            }
+            negative_types = {
+                "INHIBITS", "MITIGATES", "DAMPENS", "BLOCKS",
+                "REDUCES", "HINDERS", "SUPPRESSES", "CONSTRAINS",
+            }
             if relation_type in positive_types:
                 direction = "positive"
             elif relation_type in negative_types:
@@ -343,15 +393,22 @@ class CausalGraphBuilder:
 
     @staticmethod
     def _compute_edge_weight(evidence_count: int, strength: str) -> float:
-        """计算边权重：基于证据数量和强度
-        
-        最小权重地板 0.05：防止 evidence_count=0（LLM 对弱关系常见输出）时
-        边权重为 0，导致该边在置信度传播/路径计算/敏感性分析中完全失效。
+        """计算边权重：以 strength 为主驱动，evidence_count 作对数加成
+
+        旧设计的问题：
+          base = evidence_count / 100  # LLM 常输出 n=2，base=0.02
+          weight = base × multiplier   # 全部低于地板 0.05 → 强/中/弱无差别
+
+        修正：
+          - strength 直接作为基准权重（strong=1.0 / moderate=0.6 / weak=0.3）
+          - evidence_count 提供 log 加成上限 +0.2（弥补引用数量差异）
+          - 无地板：weak 最低 0.3，已足以传播，不需要人为托底
         """
-        multiplier = {"strong": 1.0, "moderate": 0.6, "weak": 0.3}
-        base = min(evidence_count / 100.0, 1.0)  # 100条时饱和
-        weight = base * multiplier.get(strength, 0.5)
-        return max(weight, 0.05)  # 地板：保证弱关系边至少有微弱传播能力
+        strength_base = {"strong": 1.0, "moderate": 0.6, "weak": 0.3}
+        base = strength_base.get(strength, 0.5)
+        # log1p 加成：n=0→0, n=2→+0.06, n=10→+0.14, n=20→+0.20（上限）
+        evidence_bonus = min(math.log1p(evidence_count) / math.log1p(20) * 0.2, 0.2)
+        return round(base + evidence_bonus, 3)
 
     @staticmethod
     def _fuzzy_match_node(
@@ -495,7 +552,7 @@ class CausalGraphBuilder:
             )
 
         for node in graph.nodes:
-            if node.is_prediction_target:
+            if node.is_analysis_target:
                 node.impact_score = 1.0
             else:
                 node.impact_score = self._find_max_path_weight(
@@ -509,19 +566,24 @@ class CausalGraphBuilder:
         adj: Dict[str, List[tuple]],
         max_depth: int = 6,
     ) -> float:
-        """DFS 找从 source 到 target 的最大累积权重路径"""
+        """DFS 找从 source 到 target 的最大累积权重路径（加法累积）
+
+        改为加法累积（而非乘法）：因果链中每条边的贡献独立叠加，
+        避免中介节点（如 A→B→Target）因连乘趋零而得到接近 0 的 impact_score，
+        导致结构上重要的中介因子在影响力排序和敏感性分析中被错误压制。
+        """
         if source == target:
             return 1.0
 
         best_weight = 0.0
-        stack = [(source, 1.0, {source})]  # (current, cumulative_weight, visited)
+        stack = [(source, 0.0, {source})]  # 加法从 0 开始
 
         while stack:
             current, cum_weight, visited = stack.pop()
             if len(visited) > max_depth:
                 continue
             for neighbor, edge_weight in adj.get(current, []):
-                new_weight = cum_weight * edge_weight
+                new_weight = cum_weight + edge_weight  # 加法累积
                 if neighbor == target:
                     best_weight = max(best_weight, new_weight)
                 elif neighbor not in visited:
@@ -531,23 +593,204 @@ class CausalGraphBuilder:
 
         return best_weight
 
-    # ── Step 4.5: 节点方向计算 ───────────────────────────────────
+    # ── Step 4.5a: 孤岛因子连通性校验 ──────────────────────────────
+
+    @staticmethod
+    def _validate_factor_connectivity(graph: CausalGraph) -> None:
+        """检测无法到达 analysis_target 的孤岛因子并记录 WARNING。
+
+        孤岛因子的信号证据在推演中 impact=0，意味着这部分数据对结论无贡献。
+        正常情况下 Phase 2 的连通性约束会阻止孤岛因子产生；
+        本校验作为安全网，在日志中暴露问题以便追查。
+        """
+        target_node = graph.get_target_node()
+        if not target_node:
+            return
+
+        # 构建邻接表（出边方向）
+        adj: Dict[str, List[str]] = {}
+        for e in graph.edges:
+            adj.setdefault(e.source_node_id, []).append(e.target_node_id)
+
+        target_id = target_node.node_id
+
+        def _can_reach_target(start_id: str) -> bool:
+            visited: set = set()
+            queue = [start_id]
+            while queue:
+                cur = queue.pop()
+                if cur == target_id:
+                    return True
+                if cur in visited:
+                    continue
+                visited.add(cur)
+                queue.extend(adj.get(cur, []))
+            return False
+
+        # 构建因子节点的证据信号数（用于评估孤岛的严重程度）
+        factor_evidence: Dict[str, int] = {}
+        for ce in graph.cluster_edges:
+            factor_evidence[ce.target_factor_id] = (
+                factor_evidence.get(ce.target_factor_id, 0)
+                + next(
+                    (cn.signal_count for cn in graph.cluster_nodes if cn.cluster_id == ce.source_cluster_id),
+                    0,
+                )
+            )
+
+        orphans = []
+        for node in graph.nodes:
+            if node.is_analysis_target:
+                continue
+            if not _can_reach_target(node.node_id):
+                signals = factor_evidence.get(node.node_id, 0)
+                orphans.append((node.name, signals))
+
+        if orphans:
+            orphan_desc = "  ".join(f"'{name}'({sig}条信号)" for name, sig in orphans)
+            total_orphan_signals = sum(s for _, s in orphans)
+            logger.warning(
+                "⚠️  孤岛因子检测: %d 个因子无法到达分析目标，共 %d 条信号证据被浪费 → %s"
+                "\n    原因：Phase 2 LLM 漏写了这些因子指向目标的因果边。"
+                "\n    建议：触发重试或人工检查 causal_relations 输出。",
+                len(orphans), total_orphan_signals, orphan_desc,
+            )
+        else:
+            logger.info("Step 4.5: 因果图连通性校验通过，所有因子均可到达分析目标")
+
+    # ── Step 4.5a2: 孤岛因子自动补边修复 ────────────────────────
+
+    def _repair_orphan_connectivity(self, graph: CausalGraph) -> None:
+        """为无法到达分析目标的叶子孤岛因子自动添加合成因果边。
+
+        叶子孤岛 = 在孤岛因子子图中无出边指向非孤岛节点的因子。
+        根据 evidence_direction 决定合成边类型：
+          bullish/neutral → DRIVES（正向）
+          bearish         → INHIBITS（负向）
+        """
+        target_node = graph.get_target_node()
+        if not target_node:
+            return
+
+        target_id = target_node.node_id
+
+        # 出边邻接表
+        adj: Dict[str, Set[str]] = {}
+        for e in graph.edges:
+            adj.setdefault(e.source_node_id, set()).add(e.target_node_id)
+
+        def _can_reach(start: str) -> bool:
+            visited: Set[str] = set()
+            queue = [start]
+            while queue:
+                cur = queue.pop()
+                if cur == target_id:
+                    return True
+                if cur in visited:
+                    continue
+                visited.add(cur)
+                queue.extend(adj.get(cur, set()))
+            return False
+
+        orphan_ids: Set[str] = {
+            n.node_id for n in graph.nodes
+            if not n.is_analysis_target and not _can_reach(n.node_id)
+        }
+
+        if not orphan_ids:
+            return
+
+        # 叶子孤岛：出边全部指向其他孤岛（或无出边）
+        leaf_orphans = [
+            n for n in graph.nodes
+            if n.node_id in orphan_ids
+            and all(nb in orphan_ids for nb in adj.get(n.node_id, set()))
+        ]
+
+        repaired = []
+        for node in leaf_orphans:
+            direction = node.evidence_direction or "bullish"
+            if direction == "bearish":
+                relation_type = "INHIBITS"
+                edge_direction = "negative"
+            else:
+                relation_type = "DRIVES"
+                edge_direction = "positive"
+
+            weight = self._compute_edge_weight(0, "moderate")
+            synthetic_edge = CausalEdge(
+                source_node_id=node.node_id,
+                target_node_id=target_id,
+                relation_type=relation_type,
+                weight=weight,
+                strength="moderate",
+                direction=edge_direction,
+                evidence_count=0,
+                reasoning=(
+                    f"[自动补边] {node.name} 为孤岛叶子节点，"
+                    f"依据 evidence_direction={direction} 合成 {relation_type} 边指向目标"
+                ),
+            )
+            graph.edges.append(synthetic_edge)
+            adj.setdefault(node.node_id, set()).add(target_id)
+            repaired.append(f"'{node.name}'({relation_type})")
+
+        if repaired:
+            logger.info(
+                "Step 4.5 自动补边修复: 为 %d 个叶子孤岛因子添加合成边 → %s",
+                len(repaired), "  ".join(repaired),
+            )
+
+    # ── Step 4.5b: 节点方向计算 ─────────────────────────────────
 
     @staticmethod
     def _compute_node_directions(graph: CausalGraph) -> None:
-        """基于入边方向的加权投票计算每个节点的 evidence_direction"""
+        """基于因果边方向计算每个节点的 evidence_direction。
+
+        语义定义：evidence_direction 表示该节点对分析目标的净贡献方向
+          - 有入边的节点: 入边加权投票（入边 positive→bullish，negative→bearish）
+          - 纯源节点（无入边，有出边）: 出边方向加权投票
+            「出边 positive（DRIVES/TRIGGERS）→ bullish，negative（INHIBITS）→ bearish」
+          - 孤立节点（无入边也无出边）: 回退到连接的 ClusterNode sentiment 投票
+        """
         incoming: Dict[str, List[tuple]] = {}
+        outgoing: Dict[str, List[tuple]] = {}
         for e in graph.edges:
-            incoming.setdefault(e.target_node_id, []).append(
-                (e.direction, e.weight)
-            )
+            incoming.setdefault(e.target_node_id, []).append((e.direction, e.weight))
+            outgoing.setdefault(e.source_node_id, []).append((e.direction, e.weight))
 
         cluster_node_map = {c.cluster_id: c for c in graph.cluster_nodes}
 
         for node in graph.nodes:
             edges_in = incoming.get(node.node_id, [])
-            if not edges_in:
-                # 源节点（无入边）：从连接的 ClusterNode sentiment 做信号数加权投票
+            edges_out = outgoing.get(node.node_id, [])
+
+            if edges_in:
+                # 有入边：入边加权投票（不变）
+                pos_weight = sum(w for d, w in edges_in if d == "positive")
+                neg_weight = sum(w for d, w in edges_in if d == "negative")
+                if pos_weight > neg_weight * 1.2:
+                    node.evidence_direction = "bullish"
+                elif neg_weight > pos_weight * 1.2:
+                    node.evidence_direction = "bearish"
+                else:
+                    node.evidence_direction = "neutral"
+
+            elif edges_out:
+                # 纯源节点：用出边方向判断该因子如何推动目标
+                # 出边 positive(DRIVES/TRIGGERS) → factor 推动目标正向 → bullish
+                # 出边 negative(INHIBITS/MITIGATES) → factor 压制目标 → bearish
+                pos_out = sum(w for d, w in edges_out if d == "positive")
+                neg_out = sum(w for d, w in edges_out if d == "negative")
+                if pos_out > neg_out * 1.2:
+                    node.evidence_direction = "bullish"
+                elif neg_out > pos_out * 1.2:
+                    node.evidence_direction = "bearish"
+                else:
+                    node.evidence_direction = "neutral"
+
+            else:
+                # 孤立节点（无任何因果边）：回退到簇 sentiment 投票
                 pos_signals = neg_signals = 0
                 for ce in graph.cluster_edges:
                     if ce.target_factor_id != node.node_id:
@@ -562,18 +805,7 @@ class CausalGraphBuilder:
                     node.evidence_direction = "bullish"
                 elif neg_signals > pos_signals * 1.2:
                     node.evidence_direction = "bearish"
-                # else: 保持 neutral（正负相当，或无匹配簇）
-                continue
-
-            pos_weight = sum(w for d, w in edges_in if d == "positive")
-            neg_weight = sum(w for d, w in edges_in if d == "negative")
-
-            if pos_weight > neg_weight * 1.2:
-                node.evidence_direction = "bullish"
-            elif neg_weight > pos_weight * 1.2:
-                node.evidence_direction = "bearish"
-            else:
-                node.evidence_direction = "neutral"
+                # else: 保持 neutral
 
     # ── Step 5: 少数派标注 ────────────────────────────────────────
 

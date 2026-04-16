@@ -45,7 +45,7 @@ class EntityTag:
 
 @dataclass
 class ProcessedSignal:
-    """预处理后的结构化线索"""
+    """预处理后的结构化线索（UAP v3.0）"""
     signal_id: str
     task_id: str
     agent_id: str
@@ -53,14 +53,18 @@ class ProcessedSignal:
     evidence_text: str                                    # 证据文本（端侧已脱敏）
     source_description: str = ""
     relevance_score: float = 0.5                          # Agent自评相关度(0-1)
+    relevance_reasoning: str = ""                         # UAP v3: 因子→任务的相关性推理
+    source_type: str = ""                                 # UAP v3: local_chat/web_news/user_profile等
+    data_exclusivity: str = "public"                      # UAP v3: private/semi_private/public
+    observed_at: Optional[str] = None                     # UAP v3: 证据观察时间 (ISO 8601)
     entity_tags: List[EntityTag] = field(default_factory=list)
-    weight: float = 0.0                                   # hard_fact=1.0, persona=0.1
+    weight: float = 0.0                                   # hard_fact×exclusivity_multiplier
     quality_score: float = 0.0                            # 边际贡献评分 Qi
     sentiment_tag: Optional[str] = None                   # 平台LLM标注的情感倾向
     cluster_id: Optional[str] = None
     agent_reputation: float = 100.0
     is_minority: bool = False
-    user_persona: Optional[Dict] = None                   # UAP v2.0: 端侧脱敏后的用户画像
+    user_persona: Optional[Dict] = None                   # UAP v3: 端侧脱敏后的用户画像
 
     def to_dict(self) -> Dict:
         return {
@@ -71,6 +75,10 @@ class ProcessedSignal:
             "evidence_text": self.evidence_text,
             "source_description": self.source_description,
             "relevance_score": self.relevance_score,
+            "relevance_reasoning": self.relevance_reasoning,
+            "source_type": self.source_type,
+            "data_exclusivity": self.data_exclusivity,
+            "observed_at": self.observed_at,
             "entity_tags": [t.to_dict() for t in self.entity_tags],
             "weight": self.weight,
             "quality_score": self.quality_score,
@@ -92,7 +100,7 @@ class SignalCluster:
     signals: List[ProcessedSignal] = field(default_factory=list)
     hard_fact_count: int = 0
     persona_count: int = 0
-    persona_distribution: Dict = field(default_factory=dict)  # UAP v2.0: 画像维度分布
+    persona_distribution: Dict = field(default_factory=dict)  # UAP v3.0: 画像维度分布
 
     def to_dict(self) -> Dict:
         return {
@@ -134,17 +142,18 @@ class ClusterRelation:
 
 @dataclass
 class PreprocessResult:
-    """预处理管线输出"""
+    """预处理管线输出（UAP v3.0）"""
     task_id: str
     total_signals: int
     valid_signals: int
     clusters: List[SignalCluster] = field(default_factory=list)
     minority_clusters: List[SignalCluster] = field(default_factory=list)
-    entity_index: Dict = field(default_factory=dict)      # 全局实体索引
+    entity_index: Dict = field(default_factory=dict)           # 全局实体索引
     hard_fact_count: int = 0
     persona_count: int = 0
-    persona_summary: Dict = field(default_factory=dict)      # UAP v2.0: 全局画像统计摘要
+    persona_summary: Dict = field(default_factory=dict)         # UAP v3: 全局画像统计摘要
     cluster_relations: List["ClusterRelation"] = field(default_factory=list)  # 簇间逻辑关系
+    cause_entity_seeds: List[Dict] = field(default_factory=list)  # UAP v3: role=cause 实体种子（供 Phase 2 因子命名）
 
     def to_dict(self) -> Dict:
         return {
@@ -158,4 +167,5 @@ class PreprocessResult:
             "persona_count": self.persona_count,
             "persona_summary": self.persona_summary,
             "cluster_relations": [r.to_dict() for r in self.cluster_relations],
+            "cause_entity_seeds": self.cause_entity_seeds,
         }

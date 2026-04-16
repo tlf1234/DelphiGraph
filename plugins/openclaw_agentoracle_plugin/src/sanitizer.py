@@ -65,7 +65,7 @@ class Sanitizer:
         
         Args:
             text: Raw text that may contain PII. Can be any string including
-                predictions, reasoning, or user input.
+                submissions, reasoning, or user input.
             
         Returns:
             Sanitized text with all detected PII replaced by "[REDACTED]".
@@ -104,23 +104,22 @@ class Sanitizer:
             # Return original text on error (better than crashing)
             return text if isinstance(text, str) else ""
     
-    def sanitize_prediction(self, prediction_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Sanitize all text fields in a prediction data object.
+    def sanitize_submission(self, submission_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Sanitize all text fields in a submission data object.
         
         Applies PII sanitization to text fields while leaving numeric fields
         unchanged. Creates a copy of the input dictionary to avoid modifying
         the original.
         
         Fields processed:
-        - prediction: Sanitized for PII (backward compat)
-        - reasoning: Sanitized for PII (backward compat)
-        - rationale: Sanitized for PII (new structured field)
-        - evidence_text: Sanitized for PII (new structured field)
-        - probability/confidence/relevance_score: Unchanged (numeric)
+        - reasoning: Sanitized for PII
+        - rationale: Sanitized for PII
+        - evidence_text: Sanitized for PII
+        - relevance_score: Unchanged (numeric)
         - evidence_type/entity_tags/source_urls: Unchanged (structured)
         
         Args:
-            prediction_data: Dictionary containing prediction fields.
+            submission_data: Dictionary containing submission fields.
             
         Returns:
             New dictionary with sanitized text fields. Numeric and structured
@@ -129,25 +128,24 @@ class Sanitizer:
             
         Example:
             >>> sanitizer = Sanitizer()
-            >>> prediction = {
-            ...     'probability': 0.75,
+            >>> submission = {
             ...     'rationale': 'Contact user@example.com for details',
             ...     'evidence_text': 'Source: 555-1234'
             ... }
-            >>> clean = sanitizer.sanitize_prediction(prediction)
+            >>> clean = sanitizer.sanitize_submission(submission)
             >>> print(clean['rationale'])
             'Contact [REDACTED] for details'
         """
         try:
-            if not isinstance(prediction_data, dict):
-                self.logger.error(f"[AgentOracle] sanitize_prediction received non-dict input: {type(prediction_data)}")
-                return prediction_data
+            if not isinstance(submission_data, dict):
+                self.logger.error(f"[AgentOracle] sanitize_submission received non-dict input: {type(submission_data)}")
+                return submission_data
             
-            # Create a copy of the prediction data
-            sanitized_data = prediction_data.copy()
+            # Create a copy of the submission data
+            sanitized_data = submission_data.copy()
             
             # Sanitize all text fields that may contain PII
-            text_fields = ['prediction', 'reasoning', 'rationale', 'evidence_text']
+            text_fields = ['reasoning', 'rationale', 'evidence_text']
             for field in text_fields:
                 if field in sanitized_data and isinstance(sanitized_data[field], str):
                     try:
@@ -156,14 +154,13 @@ class Sanitizer:
                         self.logger.error(f"[AgentOracle] Error sanitizing {field} field: {e}", exc_info=True)
             
             # Numeric and structured fields remain unchanged:
-            # probability, confidence, relevance_score, evidence_type,
-            # entity_tags, source_urls
+            # relevance_score, evidence_type, entity_tags, source_urls
             
             return sanitized_data
         except Exception as e:
-            self.logger.error(f"[AgentOracle] Error in sanitize_prediction: {e}", exc_info=True)
+            self.logger.error(f"[AgentOracle] Error in sanitize_submission: {e}", exc_info=True)
             # Return original data on error
-            return prediction_data
+            return submission_data
     
     def _detect_pii(self, text: str) -> List[str]:
         """Detect types of PII present in text for logging purposes.

@@ -48,7 +48,7 @@
             "description": "API Key 无效或已过期"
           },
           "403": {
-            "description": "账户受限（炼狱状态）"
+            "description": "账户受限（涅槃状态）"
           }
         }
       }

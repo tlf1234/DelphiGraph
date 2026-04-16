@@ -9,7 +9,7 @@ interface HotTask {
   title: string
   question: string
   reward_pool: number
-  prediction_count: number
+  signal_count: number
   closes_at: string
   status: string
 }
@@ -106,7 +106,7 @@ function HotTaskCard({ task }: { task: HotTask }) {
       <h3 className="text-base font-bold mb-2 text-white group-hover:text-emerald-400 transition-colors line-clamp-2 min-h-[3rem]">{task.title}</h3>
       <p className="text-sm text-zinc-400 mb-3 line-clamp-2 min-h-[2.5rem]">{task.question}</p>
       <div className="flex items-center gap-3 mb-3 text-xs text-zinc-500">
-        <div className="flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5 text-emerald-400" /><span>{task.prediction_count} 预测</span></div>
+        <div className="flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5 text-emerald-400" /><span>{task.signal_count} 信号</span></div>
         <div className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-blue-400" /><span>{daysLeft} 天</span></div>
       </div>
       <div className="pt-3 border-t border-zinc-800 flex items-center justify-between">

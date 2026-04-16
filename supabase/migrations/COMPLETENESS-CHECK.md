@@ -18,15 +18,15 @@
 | 序号 | 表名 | 用途 | 版本 | 状态 |
 |------|------|------|------|------|
 | 1 | profiles | 用户档案 | MVP + v5.0 | ✅ |
-| 2 | markets | 预测市场 | MVP + v5.0 | ✅ |
+| 2 | tasks | 预测市场 | MVP + v5.0 | ✅ |
 | 3 | predictions | 预测提交 | MVP | ✅ |
 | 4 | simulations | 未来模拟器 | MVP | ✅ |
-| 5 | calibration_tasks | 校准任务 | 炼狱系统 | ✅ |
-| 6 | redemption_attempts | 救赎尝试 | 炼狱系统 | ✅ |
+| 5 | calibration_tasks | 校准任务 | 涅槃系统 | ✅ |
+| 6 | redemption_attempts | 救赎尝试 | 涅槃系统 | ✅ |
 | 7 | reputation_history | 信誉历史 | 信誉系统 | ✅ |
 | 8 | reputation_levels | 信誉等级配置 | 信誉系统 | ✅ |
 | 9 | audit_logs | 审计日志 | 审计系统 | ✅ |
-| 10 | market_status_audit | 市场状态审计 | 审计系统 | ✅ |
+| 10 | task_status_audit | 市场状态审计 | 审计系统 | ✅ |
 | 11 | settlement_audit | 结算审计 | 审计系统 | ✅ |
 | 12 | nda_agreements | NDA签署记录 | v5.0 | ✅ |
 | 13 | crowdfunding_contributions | 众筹贡献 | v5.0 | ✅ |
@@ -41,15 +41,15 @@
 | 1 | update_updated_at_column | 自动更新时间戳 | MVP | ✅ |
 | 2 | update_prediction_count | 预测计数更新 | MVP | ✅ |
 | 3 | update_funding_progress | 众筹进度计算 | v5.0 | ✅ |
-| 4 | auto_activate_crowdfunded_market | 众筹达标激活 | v5.0 | ✅ |
-| 5 | auto_close_expired_markets | 市场自动关闭 | MVP | ✅ |
-| 6 | trigger_market_auto_close | 手动触发关闭 | MVP | ✅ |
-| 7 | log_market_status_change | 状态变更审计 | MVP | ✅ |
+| 4 | auto_activate_crowdfunded_task | 众筹达标激活 | v5.0 | ✅ |
+| 5 | auto_close_expired_tasks | 市场自动关闭 | MVP | ✅ |
+| 6 | trigger_task_auto_close | 手动触发关闭 | MVP | ✅ |
+| 7 | log_task_status_change | 状态变更审计 | MVP | ✅ |
 | 8 | update_user_reputation_and_earnings | 信誉和收益更新 | MVP | ✅ |
-| 9 | resolve_market_transaction | 市场结算 | MVP | ✅ |
+| 9 | resolve_task_transaction | 市场结算 | MVP | ✅ |
 | 10 | log_audit | 审计日志记录 | 审计系统 | ✅ |
 | 11 | audit_profiles_changes | profiles审计 | 审计系统 | ✅ |
-| 12 | audit_markets_changes | markets审计 | 审计系统 | ✅ |
+| 12 | audit_tasks_changes | tasks审计 | 审计系统 | ✅ |
 | 13 | audit_predictions_changes | predictions审计 | 审计系统 | ✅ |
 | 14 | delete_user_account | 账号删除 | MVP | ✅ |
 | 15 | calculate_brier_score | Brier Score计算 | MVP | ✅ |
@@ -64,13 +64,13 @@
 | 序号 | 触发器名 | 关联表 | 用途 | 状态 |
 |------|----------|--------|------|------|
 | 1 | update_profiles_updated_at | profiles | 自动更新时间戳 | ✅ |
-| 2 | update_markets_updated_at | markets | 自动更新时间戳 | ✅ |
+| 2 | update_tasks_updated_at | tasks | 自动更新时间戳 | ✅ |
 | 3 | update_user_prediction_count | predictions | 预测计数更新 | ✅ |
-| 4 | trigger_update_funding_progress | markets | 众筹进度计算 | ✅ |
-| 5 | trigger_auto_activate_crowdfunded_market | markets | 众筹达标激活 | ✅ |
-| 6 | market_status_change_trigger | markets | 状态变更审计 | ✅ |
+| 4 | trigger_update_funding_progress | tasks | 众筹进度计算 | ✅ |
+| 5 | trigger_auto_activate_crowdfunded_task | tasks | 众筹达标激活 | ✅ |
+| 6 | task_status_change_trigger | tasks | 状态变更审计 | ✅ |
 | 7 | audit_profiles_trigger | profiles | profiles审计 | ✅ |
-| 8 | audit_markets_trigger | markets | markets审计 | ✅ |
+| 8 | audit_tasks_trigger | tasks | tasks审计 | ✅ |
 | 9 | audit_predictions_trigger | predictions | predictions审计 | ✅ |
 
 **总计**: 9个触发器
@@ -80,7 +80,7 @@
 | 表名 | 策略数量 | 关键策略 | 状态 |
 |------|----------|----------|------|
 | profiles | 5 | 公开查看、自我管理、服务角色 | ✅ |
-| markets | 5 | v5.0私密任务访问控制 | ✅ |
+| tasks | 5 | v5.0私密任务访问控制 | ✅ |
 | predictions | 4 | v5.0 NDA验证 | ✅ |
 | simulations | 2 | 公开查看、服务角色 | ✅ |
 | audit_logs | 2 | 管理员查看、系统插入 | ✅ |
@@ -105,31 +105,31 @@
 - idx_profiles_leaderboard
 - idx_profiles_niche_tags（GIN索引，v5.0）
 
-#### 5.2 markets表索引（16个）
-- idx_markets_status
-- idx_markets_closes_at
-- idx_markets_created_by
-- idx_markets_created_at
-- idx_markets_is_calibration
-- idx_markets_status_created
-- idx_markets_status_closes
-- idx_markets_active
-- idx_markets_closed
-- idx_markets_resolved
-- idx_markets_card_data
-- idx_markets_search（GIN全文搜索）
-- idx_markets_visibility（v5.0）
-- idx_markets_funding_type（v5.0）
-- idx_markets_required_niche_tags（GIN索引，v5.0）
-- idx_markets_min_reputation（v5.0）
-- idx_markets_funding_progress（v5.0）
+#### 5.2 tasks表索引（16个）
+- idx_tasks_status
+- idx_tasks_closes_at
+- idx_tasks_created_by
+- idx_tasks_created_at
+- idx_tasks_is_calibration
+- idx_tasks_status_created
+- idx_tasks_status_closes
+- idx_tasks_active
+- idx_tasks_closed
+- idx_tasks_resolved
+- idx_tasks_card_data
+- idx_tasks_search（GIN全文搜索）
+- idx_tasks_visibility（v5.0）
+- idx_tasks_funding_type（v5.0）
+- idx_tasks_required_niche_tags（GIN索引，v5.0）
+- idx_tasks_min_reputation（v5.0）
+- idx_tasks_funding_progress（v5.0）
 
 #### 5.3 predictions表索引（7个）
-- idx_predictions_market
+- idx_predictions_task
 - idx_predictions_user
 - idx_predictions_submitted
-- idx_predictions_market_user
-- idx_predictions_market_submitted
+- idx_predictions_task_user
+- idx_predictions_task_submitted
 - idx_predictions_user_submitted
 - idx_predictions_outcome
 
@@ -139,7 +139,7 @@
 - redemption_attempts表：3个
 - reputation_history表：3个
 - audit_logs表：6个
-- market_status_audit表：2个
+- task_status_audit表：2个
 - settlement_audit表：3个
 - nda_agreements表：3个（v5.0）
 - crowdfunding_contributions表：4个（v5.0）
@@ -150,7 +150,7 @@
 
 | 序号 | 视图名 | 用途 | 状态 |
 |------|--------|------|------|
-| 1 | public_market_stats | 市场统计 | ✅ |
+| 1 | public_task_stats | 市场统计 | ✅ |
 | 2 | index_usage | 索引使用情况监控 | ✅ |
 | 3 | table_bloat | 表膨胀监控 | ✅ |
 
@@ -173,7 +173,7 @@
 - finance（金融）
 - healthcare（医疗）
 - legal（法律）
-- marketing（市场营销）
+- tasking（市场营销）
 - real_estate（房地产）
 - education（教育）
 - entertainment（娱乐）
@@ -188,7 +188,7 @@
 
 | 任务名 | 调度 | 命令 | 状态 |
 |--------|------|------|------|
-| auto-close-markets | 每分钟 | SELECT auto_close_expired_markets(); | ✅ |
+| auto-close-tasks | 每分钟 | SELECT auto_close_expired_tasks(); | ✅ |
 
 **注意**: 需要启用pg_cron扩展
 
@@ -212,7 +212,7 @@
 #### profiles表
 - ✅ niche_tags（专业领域标签数组）
 
-#### markets表
+#### tasks表
 - ✅ visibility（任务可见性：public/private）
 - ✅ min_reputation（最低信誉要求）
 - ✅ allowed_viewers（白名单）
@@ -229,16 +229,16 @@
 
 ### v5.0新增函数（4个）✅
 - ✅ update_funding_progress（众筹进度计算）
-- ✅ auto_activate_crowdfunded_market（众筹达标激活）
+- ✅ auto_activate_crowdfunded_task（众筹达标激活）
 - ✅ get_top_10_percent_threshold（Top 10%阈值）
 - ✅ can_access_private_task（私密任务访问检查）
 
 ### v5.0新增触发器（2个）✅
 - ✅ trigger_update_funding_progress
-- ✅ trigger_auto_activate_crowdfunded_market
+- ✅ trigger_auto_activate_crowdfunded_task
 
 ### v5.0新增RLS策略（6个）✅
-- ✅ v5_markets_select_policy（私密任务访问控制）
+- ✅ v5_tasks_select_policy（私密任务访问控制）
 - ✅ v5_predictions_insert_policy（NDA验证）
 - ✅ v5_nda_agreements_select_policy
 - ✅ v5_nda_agreements_insert_policy
@@ -247,11 +247,11 @@
 
 ### v5.0新增索引（7个）✅
 - ✅ idx_profiles_niche_tags（GIN索引）
-- ✅ idx_markets_visibility
-- ✅ idx_markets_funding_type
-- ✅ idx_markets_required_niche_tags（GIN索引）
-- ✅ idx_markets_min_reputation
-- ✅ idx_markets_funding_progress
+- ✅ idx_tasks_visibility
+- ✅ idx_tasks_funding_type
+- ✅ idx_tasks_required_niche_tags（GIN索引）
+- ✅ idx_tasks_min_reputation
+- ✅ idx_tasks_funding_progress
 - ✅ nda_agreements和crowdfunding_contributions相关索引
 
 ## 📊 统计摘要
@@ -272,7 +272,7 @@
 **数据库完整性验证：通过 ✅**
 
 - ✅ 所有MVP核心功能已包含
-- ✅ 炼狱+救赎系统完整
+- ✅ 涅槃+救赎系统完整
 - ✅ 信誉系统完整
 - ✅ 审计系统完整
 - ✅ v5.0 Search the Future功能完整

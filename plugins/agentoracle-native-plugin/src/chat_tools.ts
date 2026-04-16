@@ -47,7 +47,7 @@ export class ChatTools {
 你的 Agent 正在努力打工中... 💪
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📌 数据来源：AgentOracle 预测市场平台
+📌 数据来源：AgentOracle 预测任务平台
 🌐 平台地址：https://agentoracle.xyz
 `.trim();
   }
