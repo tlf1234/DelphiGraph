@@ -31,8 +31,11 @@ interface GatewayMethodContext {
  * - 后台守护进程：轮询 AgentOracle API 获取预测任务
  * - WebSocket 推理：通过 Gateway Protocol v3 调用 Agent 全能力处理任务
  * - 每日报告：定时发送收益统计报告给 Agent
- * - 聊天工具：注册 agentoracle.status 网关方法供查询收益
+ * - 聊天工具：注册 delphigraph.status 网关方法供查询收益
  */
+// ─── 单例保护：防止 Gateway 多次调用 register() 导致重复初始化 ───
+let _alreadyRegistered = false;
+
 const plugin: AgentOraclePluginModule = {
   id: 'agentoracle-native',
   name: 'AgentOracle Native',
@@ -42,10 +45,19 @@ const plugin: AgentOraclePluginModule = {
   register(api: OpenClawPluginApi): void {
     const logger = api.logger;
 
+    if (_alreadyRegistered) {
+      logger.warn('[agentoracle-native] ⚠️ Plugin register() called again — skipping duplicate initialization');
+      return;
+    }
+    _alreadyRegistered = true;
+
     logger.info('[agentoracle-native] Initializing plugin');
 
+    // 提升到 register 顶层，使 gateway method 闭包可访问
     let daemon: Daemon | null = null;
     let dailyReporter: DailyReporter | null = null;
+    let wsClient: WebSocketClient | null = null;
+    let isPluginActive = false;  // 追踪插件运行状态
 
     try {
       // 从 OpenClaw 标准配置系统读取插件配置
@@ -89,7 +101,7 @@ const plugin: AgentOraclePluginModule = {
       const chatTools = new ChatTools(apiClient);
 
       // 3. 初始化 WebSocket Client
-      const wsClient = new WebSocketClient({
+      wsClient = new WebSocketClient({
         gatewayUrl: pluginConfig.gatewayUrl,
         gatewayToken: pluginConfig.gatewayToken,
         timeout: 300,
@@ -103,9 +115,9 @@ const plugin: AgentOraclePluginModule = {
       logger.info('[agentoracle-native] WebSocket client initialized');
 
       // 4. 注册网关方法（通过 OpenClaw Plugin SDK 标准 API）
-      api.registerGatewayMethod('agentoracle.status', async ({ respond, params }: GatewayMethodContext) => {
+      api.registerGatewayMethod('delphigraph.status', async ({ respond, params }: GatewayMethodContext) => {
         logger.info('[agentoracle-native] ========================================');
-        logger.info('[agentoracle-native] Gateway method "agentoracle.status" called');
+        logger.info('[agentoracle-native] Gateway method "delphigraph.status" called');
         logger.info('[agentoracle-native] ========================================');
 
         const result = await chatTools.checkAgentOracleStatus();
@@ -118,7 +130,110 @@ const plugin: AgentOraclePluginModule = {
         return respond(true, { content: result });
       });
 
-      logger.info('[agentoracle-native] Gateway method "agentoracle.status" registered');
+      logger.info('[agentoracle-native] Gateway method "delphigraph.status" registered');
+
+      // ─── 生命周期控制：delphigraph.stop ──────────────────────────────────
+      api.registerGatewayMethod('delphigraph.stop', async ({ respond }: GatewayMethodContext) => {
+        logger.info('[agentoracle-native] ========================================');
+        logger.info('[agentoracle-native] Gateway method "delphigraph.stop" called');
+        logger.info('[agentoracle-native] ========================================');
+
+        if (!isPluginActive) {
+          return respond(true, { content: '⚠️ Delphigraph 插件当前未运行，无需停止。' });
+        }
+
+        try {
+          if (daemon) {
+            daemon.stop();
+            logger.info('[agentoracle-native] Daemon stopped via gateway method');
+          }
+          if (dailyReporter) {
+            dailyReporter.stop();
+            logger.info('[agentoracle-native] DailyReporter stopped via gateway method');
+          }
+          isPluginActive = false;
+          return respond(true, {
+            content: '✅ Delphigraph 插件已停止。\n\n' +
+              '- 🛑 后台任务轮询已停止\n' +
+              '- 🛑 每日报告已停止\n\n' +
+              '使用 `delphigraph.start` 可重新启动。'
+          });
+        } catch (err) {
+          logger.error('[agentoracle-native] Error stopping plugin', err as Error);
+          return respond(false, { content: `❌ 停止插件时出错: ${(err as Error).message}` });
+        }
+      });
+
+      logger.info('[agentoracle-native] Gateway method "delphigraph.stop" registered');
+
+      // ─── 生命周期控制：delphigraph.start ─────────────────────────────────
+      api.registerGatewayMethod('delphigraph.start', async ({ respond }: GatewayMethodContext) => {
+        logger.info('[agentoracle-native] ========================================');
+        logger.info('[agentoracle-native] Gateway method "delphigraph.start" called');
+        logger.info('[agentoracle-native] ========================================');
+
+        if (isPluginActive) {
+          return respond(true, { content: '⚠️ Delphigraph 插件已在运行中，无需重复启动。' });
+        }
+
+        try {
+          if (daemon) {
+            daemon.start();
+            logger.info('[agentoracle-native] Daemon started via gateway method');
+          }
+          if (dailyReporter) {
+            dailyReporter.start();
+            logger.info('[agentoracle-native] DailyReporter started via gateway method');
+          }
+          isPluginActive = true;
+          return respond(true, {
+            content: '✅ Delphigraph 插件已启动。\n\n' +
+              '- ▶️ 后台任务轮询已恢复\n' +
+              '- ▶️ 每日报告已恢复\n\n' +
+              '使用 `delphigraph.stop` 可随时停止。'
+          });
+        } catch (err) {
+          logger.error('[agentoracle-native] Error starting plugin', err as Error);
+          return respond(false, { content: `❌ 启动插件时出错: ${(err as Error).message}` });
+        }
+      });
+
+      logger.info('[agentoracle-native] Gateway method "delphigraph.start" registered');
+
+      // ─── 生命周期控制：delphigraph.restart ──────────────────────────────
+      api.registerGatewayMethod('delphigraph.restart', async ({ respond }: GatewayMethodContext) => {
+        logger.info('[agentoracle-native] ========================================');
+        logger.info('[agentoracle-native] Gateway method "delphigraph.restart" called');
+        logger.info('[agentoracle-native] ========================================');
+
+        try {
+          // 先停
+          if (daemon) daemon.stop();
+          if (dailyReporter) dailyReporter.stop();
+          isPluginActive = false;
+          logger.info('[agentoracle-native] Plugin stopped for restart');
+
+          // 等 1 秒后重启
+          await new Promise(r => setTimeout(r, 1000));
+
+          // 再启
+          if (daemon) daemon.start();
+          if (dailyReporter) dailyReporter.start();
+          isPluginActive = true;
+          logger.info('[agentoracle-native] Plugin restarted via gateway method');
+
+          return respond(true, {
+            content: '🔄 Delphigraph 插件已重启。\n\n' +
+              '- ▶️ 后台任务轮询已恢复\n' +
+              '- ▶️ 每日报告已恢复'
+          });
+        } catch (err) {
+          logger.error('[agentoracle-native] Error restarting plugin', err as Error);
+          return respond(false, { content: `❌ 重启插件时出错: ${(err as Error).message}` });
+        }
+      });
+
+      logger.info('[agentoracle-native] Gateway method "delphigraph.restart" registered');
 
       // 5. 创建守护进程
       daemon = new Daemon({
@@ -151,6 +266,7 @@ const plugin: AgentOraclePluginModule = {
 
       // 7. 启动守护进程
       daemon.start();
+      isPluginActive = true;
       logger.info('[agentoracle-native] Daemon started');
 
     } catch (error) {

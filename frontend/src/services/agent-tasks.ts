@@ -98,7 +98,7 @@ function matchesPersona(agent: AgentProfile, task: RawTask): boolean {
 }
 
 export type GetAgentTaskResult =
-  | { type: 'no_content' }
+  | { type: 'no_content'; reason: string; detail: string }
   | { type: 'error'; error: string; status: number }
   | { type: 'success'; tasks: unknown[]; agent_reputation: number }
 
@@ -191,29 +191,51 @@ export async function getAgentTask(apiKey: string): Promise<GetAgentTaskResult> 
   //     - 信誉分 >= min_reputation
   //     - 领域标签有交集（任一命中即可，任务未设标签则跳过）
   //     - 人口统计画像匹配（性别/地区/职业，任务无要求则跳过）
-  console.log('[agent-tasks] 步骤4: 开始过滤, 总任务数=', (tasksResult.data ?? []).length, '已提交任务数=', submittedIds.size)
-  const filtered = ((tasksResult.data ?? []) as unknown as RawTask[]).filter(task => {
+  const allTasks = (tasksResult.data ?? []) as unknown as RawTask[]
+  let excludedBySubmitted = 0
+  let excludedByReputation = 0
+  let excludedByTags = 0
+  let excludedByPersona = 0
+
+  console.log('[agent-tasks] 步骤4: 开始过滤, 总任务数=', allTasks.length, '已提交任务数=', submittedIds.size)
+  const filtered = allTasks.filter(task => {
     // 4a：排除已提交过的任务
-    if (submittedIds.has(task.id)) return false
+    if (submittedIds.has(task.id)) { excludedBySubmitted++; return false }
 
     // 4b：画像匹配（创建者和白名单成员豁免）
     const isOwner   = task.created_by === agentProfile.id
     const isAllowed = task.allowed_viewers?.includes(agentProfile.id) ?? false
     if (!isOwner && !isAllowed) {
       // 信誉分不足拒绝
-      if (agentProfile.reputation_score < (task.min_reputation ?? 0)) return false
+      if (agentProfile.reputation_score < (task.min_reputation ?? 0)) { excludedByReputation++; return false }
       // 领域标签有要求且 Agent 无一命中则拒绝
       const reqTags = task.required_niche_tags ?? []
-      if (reqTags.length > 0 && !reqTags.some(t => agentTags.includes(t))) return false
+      if (reqTags.length > 0 && !reqTags.some(t => agentTags.includes(t))) { excludedByTags++; return false }
       // 人口统计画像匹配（性别、地区、职业）
-      if (!matchesPersona(agentProfile, task)) return false
+      if (!matchesPersona(agentProfile, task)) { excludedByPersona++; return false }
     }
     return true
   })
 
   // 无可用任务返回 204（插件侧跳过本轮处理）
-  console.log('[agent-tasks] 步骤4结果: 过滤后剩余任务数=', filtered.length)
-  if (filtered.length === 0) return { type: 'no_content' }
+  console.log('[agent-tasks] 步骤4结果: 过滤后剩余任务数=', filtered.length,
+    `排除明细: 已提交=${excludedBySubmitted}, 信誉不足=${excludedByReputation}, 标签不匹配=${excludedByTags}, 画像不匹配=${excludedByPersona}`)
+  if (filtered.length === 0) {
+    let reason: string
+    let detail: string
+    if (allTasks.length === 0) {
+      reason = 'no_active_tasks'
+      detail = '平台当前没有 pending/active 状态的任务'
+    } else if (excludedBySubmitted === allTasks.length) {
+      reason = 'all_submitted'
+      detail = `全部 ${allTasks.length} 个活跃任务均已提交过`
+    } else {
+      reason = 'filtered_out'
+      detail = `共 ${allTasks.length} 个活跃任务, 已提交=${excludedBySubmitted}, 信誉不足=${excludedByReputation}, 标签不匹配=${excludedByTags}, 画像不匹配=${excludedByPersona}`
+    }
+    console.log('[agent-tasks] 无可用任务原因:', reason, detail)
+    return { type: 'no_content', reason, detail }
+  }
 
   // ── 步骤 5：排序，取第 1 条 ────────────────────────────────────────────────
   // 排序规则（明确的业务优先级，无人工评分）：

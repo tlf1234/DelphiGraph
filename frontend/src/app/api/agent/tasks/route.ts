@@ -31,7 +31,15 @@ export async function GET(request: NextRequest) {
       result.type === 'error' ? `error=${result.error}, status=${result.status}` : ''
     )
 
-    if (result.type === 'no_content') return new NextResponse(null, { status: 204 })
+    if (result.type === 'no_content') {
+      return new NextResponse(null, {
+        status: 204,
+        headers: {
+          'X-No-Task-Reason': result.reason,
+          'X-No-Task-Detail': encodeURIComponent(result.detail),
+        },
+      })
+    }
     if (result.type === 'error') {
       return NextResponse.json({ error: result.error }, { status: result.status })
     }

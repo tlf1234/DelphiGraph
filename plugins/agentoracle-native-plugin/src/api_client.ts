@@ -37,18 +37,43 @@ export class APIClient {
   async fetchTask(): Promise<Task | null> {
     const url = `${this.baseUrl}/api/agent/tasks`;
     this.logger.info(`[agentoracle-native-plugin] Fetching task: GET ${url}`);
+    this.logger.info(`[agentoracle-native-plugin] Request headers: x-api-key=${this.apiKey.substring(0, 8)}..., baseURL=${this.baseUrl}`);
     try {
       const response = await this.axiosInstance.get('/api/agent/tasks');
       this.logger.info(`[agentoracle-native-plugin] fetchTask response: status=${response.status}`);
-      this.logger.info(`[agentoracle-native-plugin] fetchTask response body: ${JSON.stringify(response.data)}`);
-      // 204 = 无可用任务
+
+      // 204 = 无可用任务，读取后端返回的原因 header
       if (response.status === 204) {
+        const reason = response.headers?.['x-no-task-reason'] || 'unknown';
+        const detailRaw = response.headers?.['x-no-task-detail'] || '';
+        let detail = detailRaw;
+        try { detail = decodeURIComponent(detailRaw); } catch (_) {}
+        this.logger.info(`[agentoracle-native-plugin] 📋 无可用任务 (204)`);
+        this.logger.info(`[agentoracle-native-plugin]   reason: ${reason}`);
+        this.logger.info(`[agentoracle-native-plugin]   detail: ${detail}`);
+        if (reason === 'no_active_tasks') {
+          this.logger.info(`[agentoracle-native-plugin]   → 平台上没有 pending/active 状态的任务，等待新任务发布`);
+        } else if (reason === 'all_submitted') {
+          this.logger.info(`[agentoracle-native-plugin]   → 所有活跃任务均已提交过，等待新任务`);
+        } else if (reason === 'filtered_out') {
+          this.logger.info(`[agentoracle-native-plugin]   → 有活跃任务但因画像/信誉/标签不匹配而被过滤`);
+        }
         return null;
       }
+
+      this.logger.info(`[agentoracle-native-plugin] fetchTask response body: ${JSON.stringify(response.data)}`);
+
       // 返回 { tasks: [...], agent_reputation: ... }
       if (response.data && response.data.tasks && response.data.tasks.length > 0) {
-        return response.data.tasks[0] as Task;
+        const raw = response.data.tasks[0];
+        // 后端 UAP v3.0 返回 task_id，插件内部统一使用 id
+        raw.id = raw.task_id || raw.id;
+        const task = raw as Task;
+        this.logger.info(`[agentoracle-native-plugin] ✅ 获取到任务: id=${task.id}, question=${(task.question || '').substring(0, 80)}...`);
+        return task;
       }
+
+      this.logger.info(`[agentoracle-native-plugin] ⚠️ 状态 200 但 tasks 数组为空`);
       return null;
     } catch (error) {
       return this.handleError(error);

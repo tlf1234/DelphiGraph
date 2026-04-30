@@ -100,10 +100,12 @@ export class DailyReporter {
    */
   stop(): void {
     if (!this.isRunning) {
+      this.logger.warn('[agentoracle-native-plugin] DailyReporter is not running, nothing to stop');
       return;
     }
 
     this.isRunning = false;
+    this.startupReportSent = false; // 重置，使重启后能再次发送启动报告
 
     if (this.cronTask) {
       this.cronTask.stop();

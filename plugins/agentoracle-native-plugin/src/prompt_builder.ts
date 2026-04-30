@@ -8,6 +8,7 @@
 export interface SignalTask {
   task_id: string;
   question: string;
+  keywords?: string[];
   context?: string;
   background?: string;
   requirements?: string[];
@@ -51,12 +52,17 @@ export class PromptBuilder {
     s.push('- ❌ 不做预测判断或结论（如“因此我认为...”、“综合来看...”）');
     s.push('- ❌ 不对任务结果给出方向性意见');
     s.push('');
+    s.push('**重要：请使用中文进行分析和回复。**');
+    s.push('');
     s.push('---');
     s.push('');
     // 任务描述
     s.push('## 任务');
     s.push('');
     s.push(task.question);
+    s.push('');
+    const keywordsStr = task.keywords && task.keywords.length > 0 ? task.keywords.join(', ') : '无';
+    s.push(`关键词：${keywordsStr}`);
     if (task.context || task.background) {
       s.push('');
       if (task.context) s.push(task.context);
@@ -256,6 +262,7 @@ export class PromptBuilder {
    */
   static buildMockSignalPrompt(params: {
     question: string;
+    keywords?: string[];
     context?: string;
     abstainReason: string;
     abstainDetail?: string;
@@ -265,9 +272,9 @@ export class PromptBuilder {
       hour: '2-digit', minute: '2-digit', second: '2-digit',
       hour12: false,
     });
-    const taskInfo = params.context
-      ? `${params.question}\n\n${params.context}`
-      : params.question;
+    const keywordsStr = params.keywords && params.keywords.length > 0 ? params.keywords.join(', ') : '无';
+    const taskInfo = `- **问题**：${params.question}\n- **关键词**：${keywordsStr}`
+      + (params.context ? `\n\n${params.context}` : '');
 
     return `【MOCK-DEBUG：二次请求 — 模拟数据构造】${now}
 

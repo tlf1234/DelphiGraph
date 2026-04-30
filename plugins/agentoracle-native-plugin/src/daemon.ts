@@ -75,8 +75,9 @@ export class Daemon {
     this.isPaused = false;
     this.logger.info('[agentoracle-native-plugin] Daemon started');
 
-    // 立即执行第一次轮询
-    this.scheduleNextPoll(0);
+    // 延迟 5 秒后执行第一次轮询，避免与 DailyReporter 的 WebSocket 连接冲突
+    this.logger.info('[agentoracle-native-plugin] First poll scheduled in 5 seconds');
+    this.scheduleNextPoll(5000);
   }
 
   /**
@@ -84,6 +85,7 @@ export class Daemon {
    */
   stop(): void {
     if (!this.isRunning) {
+      this.logger.warn('[agentoracle-native-plugin] Daemon is not running, nothing to stop');
       return;
     }
 
@@ -92,6 +94,13 @@ export class Daemon {
     if (this.timerId) {
       clearTimeout(this.timerId);
       this.timerId = null;
+    }
+
+    // 清理并发任务追踪集合，使重启后不会误拦截旧任务
+    const pendingCount = this.processingTaskIds.size;
+    if (pendingCount > 0) {
+      this.logger.warn(`[agentoracle-native-plugin] Clearing ${pendingCount} in-progress task(s) from tracking set`);
+      this.processingTaskIds.clear();
     }
 
     this.logger.info('[agentoracle-native-plugin] Daemon stopped');
@@ -119,6 +128,12 @@ export class Daemon {
    * 单次轮询周期
    */
   private async pollOnce(): Promise<void> {
+    // 如果已停止，跳过本次轮询
+    if (!this.isRunning) {
+      this.logger.info('[agentoracle-native-plugin] Daemon stopped, skipping poll');
+      return;
+    }
+
     // 如果已暂停，跳过本次轮询
     if (this.isPaused) {
       this.logger.info('[agentoracle-native-plugin] Polling paused due to authentication error');
@@ -129,6 +144,9 @@ export class Daemon {
     if (!this.hasRunVerification) {
       await this.runBuiltInVerification();
       this.hasRunVerification = true;
+      // 验证完成后等待 3 秒，让 Gateway WebSocket 连接完全释放
+      this.logger.info('[agentoracle-native-plugin] Waiting 3s after verification for Gateway to stabilize...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
     }
 
     this.logger.info('[agentoracle-native-plugin] Starting polling cycle');
@@ -158,6 +176,13 @@ export class Daemon {
 
       if (!llmResult) {
         this.logger.error(`[agentoracle-native-plugin] WebSocket reasoning failed for task: ${task.id}`);
+        this.processingTaskIds.delete(task.id);
+        return;
+      }
+
+      // WebSocket 返回后再次检查停止状态（stop 可能在等待 AI 回复期间被调用）
+      if (!this.isRunning) {
+        this.logger.info(`[agentoracle-native-plugin] Daemon stopped during task ${task.id} processing, aborting`);
         this.processingTaskIds.delete(task.id);
         return;
       }
@@ -267,6 +292,7 @@ export class Daemon {
     return PromptBuilder.buildSensorPrompt({
       task_id: task.id,
       question: task.question,
+      keywords: (task as Task).required_niche_tags || [],
       context: task.description,
       background: (task as Task).title && (task as Task).title !== task.question ? (task as Task).title : undefined,
     });
@@ -344,6 +370,7 @@ export class Daemon {
     try {
       const mockPrompt = PromptBuilder.buildMockSignalPrompt({
         question: task.question,
+        keywords: task.required_niche_tags || [],
         context: task.description,
         abstainReason,
         abstainDetail,

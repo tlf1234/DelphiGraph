@@ -242,7 +242,8 @@ export class WebSocketClient {
           }
         }
       } catch (error) {
-        this.logger.error('[agentoracle-native-plugin] WebSocket error', error as Error);
+        const errMsg = error instanceof Error ? error.message : String(error);
+        this.logger.error(`[agentoracle-native-plugin] WebSocket error: ${errMsg}`);
 
         if (attempt < this.config.maxRetries - 1) {
           continue; // 重试
@@ -324,12 +325,23 @@ export class WebSocketClient {
         handshakeTimeout: this.config.connectTimeout * 1000
       });
 
-      // 设置心跳
+      // 🔧 关键修复：立即设置消息缓冲，防止 connect.challenge 在 open 和 receiveMessage 之间丢失
+      // Python websockets 库自动缓冲消息，Node.js ws 库不会 — 必须手动实现
+      const messageBuffer: WebSocket.Data[] = [];
+      const earlyMessageHandler = (data: WebSocket.Data) => {
+        messageBuffer.push(data);
+      };
+      ws.on('message', earlyMessageHandler);
+      // 将缓冲信息附加到 ws 实例，供 receiveMessage 使用
+      (ws as any).__msgBuffer = messageBuffer;
+      (ws as any).__earlyHandler = earlyMessageHandler;
+
+      // 设置心跳（与 Python 插件一致：ping_interval=30, ping_timeout=20）
       const pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.ping();
         }
-      }, 30000); // 每30秒发送心跳
+      }, 30000);
 
       ws.on('open', () => {
         this.logger.info('[agentoracle-native-plugin] WebSocket connected');
@@ -546,24 +558,27 @@ export class WebSocketClient {
               const payload = response.payload || {};
               const state = payload.state || '';
 
-              // 提取消息内容
+              // 提取消息内容（与 Python 插件对齐：遍历所有 content items，检查 type=="text"）
               const messageData = payload.message || {};
               if (messageData.content && Array.isArray(messageData.content) && messageData.content.length > 0) {
-                const textContent = messageData.content[0].text || '';
-                if (textContent) {
-                  fullReply = textContent;
-                  lastUpdateTime = Date.now();
-
-                  // 显示进度
-                  if (fullReply.length > 0) {
+                for (const item of messageData.content) {
+                  if (item && item.type === 'text' && item.text) {
+                    fullReply = item.text;
+                    lastUpdateTime = Date.now();
                     this.logger.info(`[agentoracle-native-plugin] Received update (${fullReply.length} characters, state=${state})`);
                   }
                 }
               }
 
-              // 检查是否完成
-              if (['final', 'done', 'complete', 'finished'].includes(state)) {
+              // 检查是否完成（与 Python 插件对齐：final/aborted/error 为终止状态）
+              if (state === 'final') {
                 this.logger.info(`[agentoracle-native-plugin] Chat completed (state: ${state})`);
+                chatCompleted = true;
+                cleanup();
+                resolve(fullReply);
+              } else if (state === 'aborted' || state === 'error') {
+                const errMsg = payload.errorMessage || '';
+                this.logger.warn(`[agentoracle-native-plugin] ⚠️ Chat terminated (state: ${state}${errMsg ? `, reason: ${errMsg}` : ''})`);
                 chatCompleted = true;
                 cleanup();
                 resolve(fullReply);
@@ -630,24 +645,81 @@ export class WebSocketClient {
    * @private
    */
   private async receiveMessage<T>(ws: WebSocket, timeout: number): Promise<T> {
+    // 🔧 检查 connect() 中设置的消息缓冲（解决 Python websockets 自动缓冲 vs Node.js ws 不缓冲的差异）
+    const buffer = (ws as any).__msgBuffer as WebSocket.Data[] | undefined;
+    const earlyHandler = (ws as any).__earlyHandler;
+
+    // 移除早期缓冲 handler，后续由本方法的 handler 接管
+    if (earlyHandler) {
+      ws.off('message', earlyHandler);
+      (ws as any).__earlyHandler = null;
+    }
+
+    // 如果缓冲区有消息，立即处理（这就是 connect.challenge 被缓冲的情况）
+    if (buffer && buffer.length > 0) {
+      const data = buffer.shift()!;
+      const raw = data.toString();
+      this.logger.info(`[agentoracle-native-plugin] 📩 Raw WS recv (buffered, ${raw.length} chars): ${raw.substring(0, 200)}`);
+      try {
+        return JSON.parse(raw) as T;
+      } catch (error) {
+        throw new Error(`Failed to parse buffered message: ${raw.substring(0, 100)}`);
+      }
+    }
+
+    // 缓冲区为空，等待下一条消息
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      let settled = false;
+
+      const cleanup = () => {
+        clearTimeout(timer);
         ws.off('message', messageHandler);
-        reject(new Error('Message receive timeout'));
+        ws.off('error', errorHandler);
+        ws.off('close', closeHandler);
+      };
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        this.logger.error(`[agentoracle-native-plugin] ⏱️ receiveMessage timeout after ${timeout}ms, wsState=${ws.readyState}`);
+        cleanup();
+        reject(new Error(`Message receive timeout (${timeout}ms), wsState=${ws.readyState}`));
       }, timeout);
 
       const messageHandler = (data: WebSocket.Data) => {
-        clearTimeout(timer);
-        ws.off('message', messageHandler);
+        if (settled) return;
+        settled = true;
+        cleanup();
+        const raw = data.toString();
+        this.logger.info(`[agentoracle-native-plugin] 📩 Raw WS recv (${raw.length} chars): ${raw.substring(0, 200)}`);
         try {
-          const message = JSON.parse(data.toString());
+          const message = JSON.parse(raw);
           resolve(message as T);
         } catch (error) {
-          reject(new Error('Failed to parse message'));
+          reject(new Error(`Failed to parse message: ${raw.substring(0, 100)}`));
         }
       };
 
+      const errorHandler = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        this.logger.error(`[agentoracle-native-plugin] ❌ WS error while waiting for message: ${error.message}`);
+        cleanup();
+        reject(new Error(`WebSocket error while waiting: ${error.message}`));
+      };
+
+      const closeHandler = (code: number, reason: Buffer) => {
+        if (settled) return;
+        settled = true;
+        const reasonStr = reason ? reason.toString() : '';
+        this.logger.error(`[agentoracle-native-plugin] 🔌 WS closed while waiting for message: code=${code}, reason=${reasonStr}`);
+        cleanup();
+        reject(new Error(`WebSocket closed (code=${code}) before message received`));
+      };
+
       ws.on('message', messageHandler);
+      ws.on('error', errorHandler);
+      ws.on('close', closeHandler);
     });
   }
 

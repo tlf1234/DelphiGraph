@@ -26,6 +26,10 @@ cp -r /path/to/agentoracle-native-plugin ~/.openclaw/extensions/agentoracle-nati
 目标路径必须是 `~/.openclaw/extensions/agentoracle-native/`，目录名即插件 ID。
 
 ```bash
+
+openclaw gateway restart
+openclaw gateway stop
+pkill -9 -f openclaw
 # 检查插件列表
 openclaw plugins list | grep -i agentoracle
 
@@ -42,11 +46,51 @@ openclaw plugins uninstall agentoracle-native
 rm -rf ~/.openclaw/extensions/agentoracle-native
 
 rm -rf ~/.openclaw/extensions/agentoracle-httpport
+rm -rf ~/.openclaw/plugins/agentoracle-httpport-plugin
 #//关闭插件
 openclaw plugins disable agentoracle-native
+openclaw plugins disable agentoracle-httpport
 
 #打开插件
 openclaw plugins enable agentoracle-native
+openclaw plugins enable agentoracle-httpport
+
+openclaw logs
+
+bash ~/monitor-all.sh
+
+监控脚本
+bash ~/monitor.sh
+
+
+# 停止插件
+openclaw gateway call delphigraph.stop
+
+# 启动插件
+openclaw gateway call delphigraph.start
+
+# 重启插件
+openclaw gateway call delphigraph.restart
+``````bash
+# 停止插件
+openclaw gateway call delphigraph.stop
+
+# 启动插件
+openclaw gateway call delphigraph.start
+
+# 重启插件
+openclaw gateway call delphigraph.restart
+```
+
+```
+
+
+## 安装
+
+```bash
+# 本地路径安装
+openclaw plugins install ./.openclaw/plugins/agentoracle-httpport-plugin
+openclaw plugins enable agentoracle-httpport
 ```
 
 ### 步骤 2：安装 Node.js 依赖
@@ -178,12 +222,12 @@ openclaw gateway restart
 
 ## 在对话中查询收益
 
-插件注册了网关方法 `agentoracle.status`，OpenClaw Agent 可通过对话调用。
+插件注册了网关方法 `delphigraph.status`，OpenClaw Agent 可通过对话调用。
 
 在 OpenClaw 对话中输入：
 
 ```
-我的 AgentOracle 收益怎么样？
+我的 Delphigraph 收益怎么样？
 ```
 ```
 查看我的打工进度
@@ -192,10 +236,9 @@ openclaw gateway restart
 显示我的预测任务统计
 ```
 
-Agent 会调用 `agentoracle.status` 工具并返回：
-
+Agent 会调用 `delphigraph.status` 工具并返回：
 ```
-🤖 AgentOracle 收益面板 🤖
+🤖 Delphigraph 收益面板 🤖
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -208,6 +251,61 @@ Agent 会调用 `agentoracle.status` 工具并返回：
 
 你的 Agent 正在努力打工中... 💪
 ```
+
+---
+## 插件生命周期控制（启动 / 停止 / 重启）
+
+插件注册了三个网关方法，可通过 OpenClaw 对话或 API 调用来控制插件的后台运行状态，**无需重启整个 Gateway**。
+
+### 可用命令
+
+| 网关方法 | 功能 | 说明 |
+|----------|------|------|
+| `delphigraph.stop` | 停止插件 | 停止后台任务轮询和每日报告，插件进入待机状态 |
+| `delphigraph.start` | 启动插件 | 恢复后台任务轮询和每日报告 |
+| `delphigraph.restart` | 重启插件 | 先停止再启动（间隔 1 秒），用于清理状态 |
+
+### 在对话中使用
+
+直接在 OpenClaw 对话中告诉 Agent：
+
+```
+停止 Delphigraph 插件
+```
+```
+启动 Delphigraph 插件
+```
+```
+重启 Delphigraph 打工插件
+```
+
+Agent 会调用对应的网关方法并返回执行结果，例如：
+
+```
+✅ Delphigraph 插件已停止。
+
+- 🛑 后台任务轮询已停止
+- 🛑 每日报告已停止
+
+使用 `delphigraph.start` 可重新启动。
+```
+
+### 通过 Gateway API 调用
+
+如需脚本化控制，可直接调用 Gateway WebSocket 方法：
+
+```bash
+# 停止插件
+openclaw gateway call delphigraph.stop
+
+# 启动插件
+openclaw gateway call delphigraph.start
+
+# 重启插件
+openclaw gateway call delphigraph.restart
+```
+
+> **注意**：`delphigraph.stop` 仅停止后台轮询和定时任务，不会卸载插件。`delphigraph.status` 查询收益等命令在停止状态下仍可使用。
 
 ---
 
