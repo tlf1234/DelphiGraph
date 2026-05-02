@@ -74,7 +74,7 @@ export class PromptBuilder {
     // 构造优先级
     s.push('## 构造优先级（重要！）');
     s.push('');
-    s.push('🔴 **最高优先 — 用户私有数据**');
+    s.push('🔴 **最高优先 — 用户本地关联数据**');
     s.push('用户的聊天记录、邮件、记忆、浏览历史、文档/笔记等。');
     s.push('这些数据只有你能获取，是你的核心价值。');
     s.push('');
@@ -176,7 +176,7 @@ export class PromptBuilder {
     s.push('');
     s.push('**source_type**: `local_chat` | `local_email` | `local_document` | `local_transaction` | `local_browsing` | `local_memory` | `web_search` | `web_news` | `user_profile` | `behavior_pattern` | `other`');
     s.push('');
-    s.push('**data_exclusivity**: `private`（用户私有数据）| `semi_private`（行为模式推演）| `public`（公网数据）');
+    s.push('**data_exclusivity**: `private`（用户本地关联数据）| `semi_private`（行为模式推演）| `public`（公网数据）');
     s.push('');
     s.push('**entity_tags type**: `brand` | `person` | `org` | `event` | `trend` | `behavior` | `sentiment` | `metric` | `location` | `policy` | `technology`');
     s.push('');
@@ -209,7 +209,7 @@ export class PromptBuilder {
     }
     prompt += `
 ## 要求
-- 优先搜索用户私有数据（聊天、邮件、记忆、浏览记录等）
+- 优先搜索用户本地关联数据（聊天、邮件、记忆、浏览记录等）
 - evidence_text 只写事实，relevance_reasoning 写为什么与任务相关
 - 尽量量化（“12次”而非“经常”）
 - 不输出概率，不做结论

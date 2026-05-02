@@ -1436,7 +1436,7 @@ class BackgroundDaemon:
 
 ## 构造优先级（重要！）
 
-🔴 **最高优先 — 用户私有数据**
+🔴 **最高优先 — 用户本地关联数据**
 用户的聊天记录、邮件、记忆、浏览历史、文档/笔记等。
 这些数据只有你能获取，是你的核心价值。
 
@@ -1533,7 +1533,7 @@ class BackgroundDaemon:
 
 **source_type**: `local_chat` | `local_email` | `local_document` | `local_transaction` | `local_browsing` | `local_memory` | `web_search` | `web_news` | `user_profile` | `behavior_pattern` | `other`
 
-**data_exclusivity**: `private`（用户私有数据）| `semi_private`（行为模式推演）| `public`（公网数据）
+**data_exclusivity**: `private`（用户本地关联数据）| `semi_private`（行为模式推演）| `public`（公网数据）
 
 **entity_tags type**: `brand` | `person` | `org` | `event` | `trend` | `behavior` | `sentiment` | `metric` | `location` | `policy` | `technology`
 
