@@ -17,15 +17,13 @@ function serviceClient() {
  *   signals: Array<{                   // 非弃权时必填
  *     signal_id?: string,
  *     evidence_type: 'hard_fact' | 'persona_inference',
- *     source_type?: string,
- *     data_exclusivity?: 'public' | 'semi_private' | 'private',
- *     source_description?: string,     // UAP v3.0 数据源描述
- *     observed_at?: string,            // UAP v3.0 观察时间 (ISO 8601)
  *     evidence_text: string,           // 必填
- *     relevance_reasoning?: string,
  *     relevance_score?: number,
+ *     relevance_reasoning?: string,
+ *     entity_tags?: Array<{ text: string; type: string; role: string }>,
  *     source_urls?: string[],
- *     entity_tags?: Array<{ text: string; type: string; role: string }>
+ *     source_type?: string,
+ *     data_exclusivity?: 'public' | 'semi_private' | 'private'
  *   }>,
  *   abstain_reason?: string,           // 弃权时可填
  *   abstain_detail?: string,
@@ -42,15 +40,13 @@ export interface SignalInput {
   signals?: Array<{
     signal_id?: string
     evidence_type?: string
+    evidence_text?: string
+    relevance_score?: number
+    relevance_reasoning?: string
+    entity_tags?: Array<{ text: string; type: string; role: string }>
+    source_urls?: string[]
     source_type?: string
     data_exclusivity?: string
-    source_description?: string    // UAP v3.0 数据源描述
-    observed_at?: string          // UAP v3.0 观察时间
-    evidence_text?: string
-    relevance_reasoning?: string
-    relevance_score?: number
-    source_urls?: string[]
-    entity_tags?: Array<{ text: string; type: string; role: string }>
   }>
   abstain_reason?: string
   abstain_detail?: string
@@ -143,15 +139,13 @@ export async function submitAgentSignal(
     signals:  abstain ? [] : (signals || []).map(sig => ({
       signal_id:          sig.signal_id || `sig_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`,
       evidence_type:      sig.evidence_type || 'persona_inference',
+      evidence_text:      sig.evidence_text || '',
+      relevance_score:    sig.relevance_score ?? 0.5,
+      relevance_reasoning: sig.relevance_reasoning || '',
+      entity_tags:        sig.entity_tags || [],
+      source_urls:        sig.source_urls || [],
       source_type:        sig.source_type || '',
       data_exclusivity:   sig.data_exclusivity || 'public',
-      source_description: sig.source_description || '',           // UAP v3.0 新增
-      observed_at:        sig.observed_at || new Date().toISOString(), // UAP v3.0 新增
-      evidence_text:      sig.evidence_text || '',
-      relevance_reasoning: sig.relevance_reasoning || '',
-      relevance_score:    sig.relevance_score ?? 0.5,
-      source_urls:        sig.source_urls || [],
-      entity_tags:        sig.entity_tags || [],
     })),
   }
 

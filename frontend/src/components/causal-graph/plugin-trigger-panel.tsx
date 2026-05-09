@@ -38,6 +38,8 @@ export interface PluginTriggerPanelProps {
   onTriggerAnalysis: (forceFinal: boolean) => Promise<void>
   /** 触发时同步启动父组件的 causal_analyses 轮询 */
   onStartPolling: () => void
+  /** 点「开始监控」时同步启动父组件 startRealMode，启用实时预览图谱构建 */
+  onStartRealMode: () => void
   onClose: () => void
 }
 
@@ -47,6 +49,7 @@ export default function PluginTriggerPanel({
   taskId,
   onTriggerAnalysis,
   onStartPolling,
+  onStartRealMode,
   onClose,
 }: PluginTriggerPanelProps) {
   const [phase, setPhase] = useState<TriggerPhase>('idle')
@@ -93,6 +96,9 @@ export default function PluginTriggerPanel({
     setPhase('monitoring')
     setLog([])
 
+    // 同步启动父组件实时预览图谱构建（signal_submissions 变化→ buildPreliminaryGraph）
+    onStartRealMode()
+
     const supabase = createClient()
 
     // 初始化：读取任务配置
@@ -117,6 +123,7 @@ export default function PluginTriggerPanel({
     addLog(`📡 开始监控插件信号（每 ${POLL_INTERVAL_MS / 1000}s 轮询一次）`)
     addLog(`🎯 目标: ${target > 0 ? `${target} 个 Agent` : '无限制（手动触发）'}`)
     addLog(`📊 当前: ${initial} 个 Agent · ${task.signal_submission_count ?? 0} 条信号`)
+
     if (target > 0 && initial >= target) {
       addLog('⚡ 当前已达到阈值，可直接手动触发')
     }
@@ -155,7 +162,7 @@ export default function PluginTriggerPanel({
         }, 1000)
       }
     }, POLL_INTERVAL_MS)
-  }, [taskId, addLog, handleTrigger])
+  }, [taskId, addLog, handleTrigger, onStartRealMode])
 
   // ── 停止监控 ─────────────────────────────────────────────────────
   const handleStop = useCallback(() => {
@@ -248,6 +255,7 @@ export default function PluginTriggerPanel({
             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg
                        text-xs font-semibold bg-emerald-500/20 text-emerald-300
                        hover:bg-emerald-500/30 border border-emerald-500/30 transition-all"
+            title="开始监控插件信号；如已达标将立即触发因果分析"
           >
             <Radio className="w-3.5 h-3.5" />
             {phase === 'error' ? '重新监控' : '开始监控'}
@@ -263,20 +271,6 @@ export default function PluginTriggerPanel({
             停止监控
           </button>
         ) : null}
-
-        {/* 手动触发（监控中或 idle 已有数据时可用） */}
-        <button
-          onClick={handleTrigger}
-          disabled={phase === 'triggering' || phase === 'triggered'}
-          className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold
-                     bg-amber-500/10 text-amber-400 hover:bg-amber-500/20
-                     border border-amber-500/20 transition-all
-                     disabled:opacity-40 disabled:cursor-not-allowed"
-          title="手动立即触发因果分析（不等达到阈值）"
-        >
-          <Zap className="w-3.5 h-3.5" />
-          立即触发
-        </button>
       </div>
 
       {/* ── 日志 ─────────────────────────────────────────────── */}

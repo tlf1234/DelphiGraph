@@ -1085,14 +1085,32 @@ Submission Status: {sub_status}
         if prefill_key:
             self._sim_keys_text.insert('1.0', prefill_key)
 
-        # 任务 ID
+        # 任务 ID（必填，必须对应平台真实任务）
         row = ttk.Frame(params_frame)
         row.pack(fill=tk.X, pady=2)
-        ttk.Label(row, text="任务 ID:", width=12, font=self.default_font).pack(side=tk.LEFT)
+        # 红色标签 + * 必填标识（width=12 与其他字段对齐）
+        ttk.Label(
+            row, text="任务 ID *:", width=12,
+            font=self.default_font, foreground='#dc2626',
+        ).pack(side=tk.LEFT)
         self._sim_task_id_var = tk.StringVar()
-        ttk.Entry(row, textvariable=self._sim_task_id_var,
-                  font=self.mono_font, foreground='#555').pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Label(row, text="（空=自动获取）", font=self.default_font).pack(side=tk.LEFT, padx=4)
+        self._sim_task_id_entry = tk.Entry(
+            row, textvariable=self._sim_task_id_var,
+            font=self.mono_font, fg='#1a1a1a',
+            highlightthickness=2,
+            highlightbackground='#dc2626', highlightcolor='#dc2626',  # 红框凸显必填
+        )
+        self._sim_task_id_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # 警示副文案：必须与平台真实任务匹配
+        warn_row = ttk.Frame(params_frame)
+        warn_row.pack(fill=tk.X, pady=(0, 2))
+        ttk.Label(warn_row, text="", width=12).pack(side=tk.LEFT)  # 占位对齐
+        tk.Label(
+            warn_row,
+            text="⚠ 必填：必须与平台 URL 中的任务 ID 完全一致，否则平台无任何反应",
+            font=self.default_font, fg='#b91c1c',
+        ).pack(side=tk.LEFT)
 
         # Agent 数量 + 延迟
         row = ttk.Frame(params_frame)
@@ -1111,7 +1129,7 @@ Submission Status: {sub_status}
         # 清除历史数据
         row = ttk.Frame(params_frame)
         row.pack(fill=tk.X, pady=2)
-        self._sim_clear_var = tk.BooleanVar(value=False)
+        self._sim_clear_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(row,
             text="提交前清除该任务历史数据（调用 /api/test/prepare，需指定任务 ID）",
             variable=self._sim_clear_var).pack(side=tk.LEFT)
@@ -1255,6 +1273,36 @@ Submission Status: {sub_status}
         if not url:
             messagebox.showerror("参数错误", "请填写平台地址")
             return
+
+        # ── 任务 ID 强制校验 ──────────────────────────────────────────
+        if not task_id:
+            messagebox.showerror(
+                "任务 ID 必填",
+                "请填写「任务 ID」字段。\n\n"
+                "该 ID 必须与平台 URL 中的任务 ID 完全一致\n"
+                "（例如 /tasks/<task_id> 中的 UUID）。\n\n"
+                "任务 ID 不匹配时平台不会有任何反应。"
+            )
+            try:
+                self._sim_task_id_entry.focus_set()
+            except Exception:
+                pass
+            return
+
+        # 简单 UUID 格式校验（不强制，仅警告）
+        import re as _re
+        _uuid_re = _re.compile(
+            r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+            _re.IGNORECASE,
+        )
+        if not _uuid_re.match(task_id):
+            if not messagebox.askyesno(
+                "任务 ID 格式可疑",
+                f"输入的任务 ID 不像标准 UUID：\n\n{task_id}\n\n"
+                "标准格式应为 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx。\n\n"
+                "是否仍要继续？"
+            ):
+                return
 
         # 解析 API Keys（换行或逗号分隔）
         api_keys = [k.strip()

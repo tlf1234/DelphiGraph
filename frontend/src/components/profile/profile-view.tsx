@@ -2,7 +2,7 @@
 
 import { ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts'
 import Link from 'next/link'
-import { TrendingUp, Target, DollarSign, Lock, Search, Settings, ChevronRight, ArrowLeft, Zap, BarChart2 } from 'lucide-react'
+import { TrendingUp, Target, DollarSign, Lock, Search, Settings, ChevronRight, ArrowLeft, BarChart2 } from 'lucide-react'
 import ReputationBadge from '@/components/reputation/reputation-badge'
 import ReputationProgress from '@/components/reputation/reputation-progress'
 import ReputationChart from '@/components/reputation/reputation-chart'
@@ -198,7 +198,6 @@ export default function ProfileView({ profile, isOwnProfile }: ProfileViewProps)
                 { href: '/market-search', icon: <Search size={15} />, label: '搜索任务', desc: `${profile.accessible_private_tasks ?? 0} 个私密任务可访问`, color: '#00ff88' },
                 { href: '/submissions',   icon: <Target size={15} />,  label: '我的提交', desc: `共 ${profile.total_submissions} 次`,           color: '#a78bfa' },
                 { href: '/earnings',      icon: <DollarSign size={15} />, label: '收益历史', desc: `累计 $${profile.total_earnings.toFixed(2)}`, color: '#00d4ff' },
-                { href: '/profile/persona', icon: <Zap size={15} />,   label: '管理画像', desc: '匹配最合适的任务',                            color: '#fbbf24' },
                 { href: '/settings',      icon: <Settings size={15} />, label: '账号设置', desc: 'API Key · 安全设置',                         color: '#6b7280' },
               ].map(({ href, icon, label, desc, color }) => (
                 <Link key={href} href={href}

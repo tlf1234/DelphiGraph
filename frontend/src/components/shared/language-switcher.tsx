@@ -11,7 +11,7 @@ export default function LanguageSwitcher() {
     setMounted(true)
     // 从localStorage读取语言偏好
     const savedLang = localStorage.getItem('language') as Language
-    if (savedLang) {
+    if (savedLang === 'en' || savedLang === 'zh') {
       setLanguage(savedLang)
       document.documentElement.lang = savedLang
     }

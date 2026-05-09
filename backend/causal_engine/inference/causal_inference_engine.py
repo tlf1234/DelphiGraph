@@ -475,7 +475,7 @@ class CausalInferenceEngine:
         sorted_nodes = sorted(
             graph.nodes, key=lambda n: n.impact_score, reverse=True
         )
-        # 网加当前因子的私有数据占比（用于结论生成时加权）
+        # 网加当前因子的本地关联数据占比（用于结论生成时加权）
         cluster_signal_map = {c.cluster_id: c.signals for c in preprocess_result.clusters}
         node_lines = []
         for n in sorted_nodes:
@@ -490,7 +490,7 @@ class CausalInferenceEngine:
             excl_note = ""
             if excl_total > 0 and (excl_private + excl_semi) > 0:
                 excl_pct = (excl_private + excl_semi) / excl_total
-                excl_note = f", 私有数据={excl_pct:.0%}"
+                excl_note = f", 本地关联数据={excl_pct:.0%}"
             node_lines.append(
                 f"- {n.name} (类别={n.category}, 方向={n.evidence_direction or 'neutral'}, "
                 f"置信度={n.confidence:.2f}, 影响力={n.impact_score:.2f}, "

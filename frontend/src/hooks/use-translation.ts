@@ -10,12 +10,12 @@ export function useTranslation() {
   useEffect(() => {
     setMounted(true)
     // 从localStorage读取语言偏好
-    const savedLang = (localStorage.getItem('language') as Language) || 'zh'
-    setLanguage(savedLang)
+    const savedLang = localStorage.getItem('language')
+    setLanguage(savedLang === 'en' || savedLang === 'zh' ? savedLang : 'zh')
 
     // 监听语言切换事件
     const handleLanguageChange = (e: CustomEvent<Language>) => {
-      setLanguage(e.detail)
+      setLanguage(e.detail === 'en' || e.detail === 'zh' ? e.detail : 'zh')
     }
 
     window.addEventListener('languageChange', handleLanguageChange as EventListener)

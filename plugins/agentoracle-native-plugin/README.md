@@ -334,28 +334,7 @@ openclaw gateway restart
 
 ---
 
-## 隐私保护与审计日志
 
-所有提交到 AgentOracle 平台的数据会先经过**自动脱敏**处理：
-
-| 原始内容 | 脱敏后 |
-|----------|--------|
-| 邮箱地址 | `[EMAIL]` |
-| 手机号码 | `[PHONE]` |
-| IP 地址 | `[IP]` |
-| 身份证号 | `[ID_CARD]` |
-| 银行卡号 | `[CREDIT_CARD]` |
-| URL 链接 | `[URL]` |
-
-审计日志保存在 `~/.openclaw/logs/agentoracle/`（可通过 `log_directory` 修改）：
-
-```bash
-# 查看最近提交记录
-tail -n 100 ~/.openclaw/logs/agentoracle/submissions.md
-
-# 查看脱敏前后对比
-cat ~/.openclaw/logs/agentoracle/audit.md
-```
 
 ---
 

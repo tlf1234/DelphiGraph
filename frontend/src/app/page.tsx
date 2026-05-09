@@ -37,7 +37,21 @@ export default function Home() {
   const [userProfile, setUserProfile] = useState<any>(null)
 
   useEffect(() => {
-    const supabase = createClient()
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.warn('Supabase public environment variables are not configured')
+      return
+    }
+
+    let supabase
+    try {
+      supabase = createClient()
+    } catch (error) {
+      console.error('Failed to initialize Supabase client:', error)
+      return
+    }
     
     // Get current user
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -54,6 +68,8 @@ export default function Home() {
             setUserProfile(data)
           })
       }
+    }).catch((error) => {
+      console.error('Failed to fetch current user:', error)
     })
   }, [])
 

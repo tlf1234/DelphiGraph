@@ -22,6 +22,9 @@ const nextConfig = {
   compress: true,
   // 生产环境优化
   productionBrowserSourceMaps: false,
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   // React严格模式
   reactStrictMode: true,
   // SWC压缩

@@ -47,7 +47,7 @@ class SignalPreprocessor:
         EvidenceType.PERSONA_INFERENCE: 0.1,
     }
     EXCLUSIVITY_WEIGHTS = {
-        "private": 1.5,       # 用户私有数据，独立观测，最高信息价値
+        "private": 1.5,       # 用户本地关联数据，独立观测，最高信息价値
         "semi_private": 1.0,  # 生成推演，中等价値
         "public": 0.5,        # 公网数据，多 Agent 可能重复，边际价値最低
     }
@@ -515,7 +515,7 @@ class SignalPreprocessor:
             "3. 聚类特征三维联合考虑：①证据文本语义 ②因果推理语义 ③共享因果实体\n"
             "4. 【时序感知】同一因果实体在不同时间窗口（[近7天]/[近30天]/[1-3个月]）"
             "若情感方向相反，必须拆分为独立簇并标注方向翻转\n"
-            "5. 私有数据（[私有]标记）具有独立观测价值，按因果主题分组时不因重复文本被排除\n"
+            "5. 本地关联数据（[私有]标记）具有独立观测价值，按因果主题分组时不因重复文本被排除\n"
             "6. 每个聚类判断其对预测问题的情感倾向（positive/negative/neutral）\n"
             "7. 输出 JSON 格式\n\n"
             '## 输出格式\n{"clusters": [\n'
@@ -1011,17 +1011,17 @@ class SignalPreprocessor:
                     "- 0.4-0.6：与簇内其他信号存在中度重叠，仍有增量价值\n"
                     "- 0.1-0.3：高度冗余，主要重复簇内已有信息\n"
                     "- 0.0：完全重复或与簇主题无关\n"
-                    "> private 私有数据即使内容相似，其独立观测来源也具备更高边际价值\n\n"
+                    "> private 本地关联数据即使内容相似，其独立观测来源也具备更高边际价值\n\n"
                 )
             else:
                 intro = (
                     "请为以下线索评估信息质量分数 (0-1)。\n"
-                    "- 1.0: 罕见、具体、可验证的硬核事实（尤其 private 私有数据）\n"
+                    "- 1.0: 罕见、具体、可验证的硬核事实（尤其 private 本地关联数据）\n"
                     "- 0.7-0.9: 有价值的具体细节，或具备因果推理\n"
                     "- 0.4-0.6: 一般性信息，有一定参考价值\n"
                     "- 0.1-0.3: 泛泛内容或公网重复数据\n"
                     "- 0.0: 重复/无关/幻觉内容\n"
-                    "> 注意: private 私有数据的独立观测价值高于 public 公网数据\n\n"
+                    "> 注意: private 本地关联数据的独立观测价值高于 public 公网数据\n\n"
                 )
             signal_texts = "\n".join(
                 f"[{j}][{'硬核事实' if s.evidence_type == EvidenceType.HARD_FACT else '画像推演'}]"
@@ -1071,7 +1071,7 @@ class SignalPreprocessor:
         权重设计：
           evidence_type     硬核事实=0.35 / 画像推演=0.08
           data_exclusivity  private=+0.15 / semi_private=+0.05 / public=+0.00
-          source_type       本地私有数据来源+0.05
+          source_type       本地关联数据来源+0.05
           text_length       ≥10字=+0.15 / ≥50字=+0.08
           relevance_reasoning 非空=+0.05（Agent已做因果推理）
           entity_tags       每个实体+0.04（上限为0.12）
@@ -1180,12 +1180,12 @@ class SignalPreprocessor:
                 f"## 预测问题\n{task_query}\n\n"
                 f"## 线索（含数据独占性和因果推理）\n{signal_texts}\n\n"
                 "## 评分标准\n"
-                "- 1.0: 罕见、具体、可验证的硬核事实（尤其 private 私有数据）\n"
+                "- 1.0: 罕见、具体、可验证的硬核事实（尤其 private 本地关联数据）\n"
                 "- 0.7-0.9: 有价值的具体细节，或具备因果推理\n"
                 "- 0.4-0.6: 一般性信息，有一定参考价值\n"
                 "- 0.1-0.3: 泛泛内容或公网重复数据\n"
                 "- 0.0: 重复/无关/幻觉内容\n\n"
-                "> 注意: private 私有数据的独立观测价值高于 public 公网数据\n\n"
+                "> 注意: private 本地关联数据的独立观测价值高于 public 公网数据\n\n"
                 '## 输出 JSON\n{"scores": [0.85, 0.40, ...]}'
             )
             async with semaphore:
@@ -1242,7 +1242,7 @@ class SignalPreprocessor:
         """识别少数派语义簇 — UAP v3 三维综合评估
 
         维度1: Qi 平均质量（基础门槛 > 0.3）
-        维度2: data_exclusivity 加成（私有数据的少数派独立观测价值更高）
+        维度2: data_exclusivity 加成（本地关联数据的少数派独立观测价值更高）
         维度3: cause/indicator 实体独特性（含多数派未覆盖的因果实体则加分）
         综合分 effective_qi > 0.45 才标为有价值的少数派
         """
@@ -1276,7 +1276,7 @@ class SignalPreprocessor:
             if avg_qi <= 0.3:
                 continue
 
-            # UAP v3: data_exclusivity 加成（私有/半私有数据的独立观测价值）
+            # UAP v3: data_exclusivity 加成（私有/半本地关联数据的独立观测价值）
             n = max(len(c.signals), 1)
             private_ratio = sum(1 for s in c.signals if s.data_exclusivity == "private") / n
             semi_ratio = sum(1 for s in c.signals if s.data_exclusivity == "semi_private") / n

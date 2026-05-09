@@ -44,6 +44,8 @@ npm start
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+BACKEND_API_URL=http://localhost:8100
+CAUSAL_ENGINE_URL=http://localhost:8100
 ```
 
 ## 项目结构

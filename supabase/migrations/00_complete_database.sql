@@ -10,7 +10,7 @@
 -- 3. 信誉系统表
 -- 4. 审计日志表
 -- 5. v5.0升级功能（智能分发、NDA、众筹、专业领域匹配）
--- 6. 画像系统表 (agent_personas, task_personas)
+-- 6. 画像系统表 (task_personas)
 -- 7. 因果分析结果表 (causal_analyses)
 -- 8. 调查模块表 (survey_tasks, survey_questions, survey_responses, survey_analyses)
 -- 9. 所有索引和约束
@@ -427,32 +427,9 @@ ON CONFLICT (tag_key) DO NOTHING;
 -- ============================================================================
 -- PART 5.5: 画像系统表
 -- ============================================================================
+-- 注意：agent_personas 表已被移除，profiles 表的简化画像字段用于任务匹配
 
--- 5.5.1 Agent 用户画像表
-CREATE TABLE IF NOT EXISTS agent_personas (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  agent_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  age_range TEXT,
-  gender TEXT,
-  location TEXT[],
-  education TEXT,
-  occupation_type TEXT,
-  occupation TEXT,
-  life_stage TEXT[],
-  interests TEXT[],
-  consumption_behaviors TEXT[],
-  concerns TEXT[],
-  experiences TEXT[],
-  familiar_topics TEXT[],
-  affected_by TEXT[],
-  bio TEXT,
-  verified BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(agent_id)
-);
-
--- 5.5.2 任务目标人群画像表
+-- 5.5.1 任务目标人群画像表
 CREATE TABLE IF NOT EXISTS task_personas (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   task_id UUID REFERENCES prediction_tasks(id) ON DELETE CASCADE,
@@ -692,14 +669,7 @@ CREATE INDEX IF NOT EXISTS idx_simulations_task ON simulations(task_id);
 CREATE INDEX IF NOT EXISTS idx_simulations_generated ON simulations(generated_at DESC);
 
 -- 6.6 Persona 表索引
-CREATE INDEX IF NOT EXISTS idx_agent_personas_agent_id ON agent_personas(agent_id);
-CREATE INDEX IF NOT EXISTS idx_agent_personas_age_range ON agent_personas(age_range);
-CREATE INDEX IF NOT EXISTS idx_agent_personas_gender ON agent_personas(gender);
-CREATE INDEX IF NOT EXISTS idx_agent_personas_occupation ON agent_personas(occupation);
-CREATE INDEX IF NOT EXISTS idx_agent_personas_location ON agent_personas USING GIN (location);
-CREATE INDEX IF NOT EXISTS idx_agent_personas_interests ON agent_personas USING GIN (interests);
-CREATE INDEX IF NOT EXISTS idx_agent_personas_experiences ON agent_personas USING GIN (experiences);
-CREATE INDEX IF NOT EXISTS idx_agent_personas_familiar ON agent_personas USING GIN (familiar_topics);
+-- agent_personas 索引已移除（表已删除）
 CREATE INDEX IF NOT EXISTS idx_task_personas_task_id ON task_personas(task_id);
 CREATE INDEX IF NOT EXISTS idx_task_personas_confidence ON task_personas(confidence);
 CREATE INDEX IF NOT EXISTS idx_task_personas_target_demographic ON task_personas USING GIN (target_demographic);
@@ -936,11 +906,7 @@ CREATE TRIGGER trigger_update_task_signal_submission_count
   EXECUTE FUNCTION update_task_signal_submission_count();
 
 -- 7.7 Persona / Causal updated_at 触发器
-DROP TRIGGER IF EXISTS update_agent_personas_updated_at ON agent_personas;
-CREATE TRIGGER update_agent_personas_updated_at
-  BEFORE UPDATE ON agent_personas
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
+-- agent_personas 触发器已移除（表已删除）
 
 DROP TRIGGER IF EXISTS update_causal_analyses_updated_at ON causal_analyses;
 CREATE TRIGGER update_causal_analyses_updated_at
@@ -1607,7 +1573,7 @@ ALTER TABLE redemption_attempts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reputation_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_status_audit ENABLE ROW LEVEL SECURITY;
 ALTER TABLE settlement_audit ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_personas ENABLE ROW LEVEL SECURITY;
+-- agent_personas RLS 已移除（表已删除）
 ALTER TABLE task_personas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE causal_analyses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE survey_tasks ENABLE ROW LEVEL SECURITY;
@@ -1784,15 +1750,7 @@ CREATE POLICY "管理员可以查看结算审计" ON settlement_audit FOR SELECT
 DROP POLICY IF EXISTS "服务角色可以管理所有settlement_audit" ON settlement_audit;
 CREATE POLICY "服务角色可以管理所有settlement_audit" ON settlement_audit FOR ALL TO service_role USING (true) WITH CHECK (true);
 
--- 14.14 Agent_personas 表策略
-DROP POLICY IF EXISTS "Agents can view own persona" ON agent_personas;
-CREATE POLICY "Agents can view own persona" ON agent_personas FOR SELECT USING (auth.uid() = agent_id);
-DROP POLICY IF EXISTS "Agents can insert own persona" ON agent_personas;
-CREATE POLICY "Agents can insert own persona" ON agent_personas FOR INSERT WITH CHECK (auth.uid() = agent_id);
-DROP POLICY IF EXISTS "Agents can update own persona" ON agent_personas;
-CREATE POLICY "Agents can update own persona" ON agent_personas FOR UPDATE USING (auth.uid() = agent_id);
-DROP POLICY IF EXISTS "服务角色可以管理所有agent_personas" ON agent_personas;
-CREATE POLICY "服务角色可以管理所有agent_personas" ON agent_personas FOR ALL TO service_role USING (true) WITH CHECK (true);
+-- 14.14 Agent_personas 表策略已移除（表已删除）
 
 -- 14.15 Task_personas 表策略
 DROP POLICY IF EXISTS "认证用户可以查看任务画像" ON task_personas;
@@ -2033,7 +1991,7 @@ COMMENT ON TABLE settlement_audit IS '任务结算审计日志（ℹ️ total_pr
 COMMENT ON TABLE nda_agreements IS 'NDA签署记录表，记录Agent对私密任务的保密协议签署';
 COMMENT ON TABLE crowdfunding_contributions IS '众筹贡献记录表，记录用户对众筹任务的资金贡献';
 COMMENT ON TABLE niche_tags_reference IS '专业领域标签参考表，存储预定义的领域分类';
-COMMENT ON TABLE agent_personas IS 'Agent用户画像表，存储AI生成的用户属性画像';
+-- agent_personas 注释已移除（表已删除）
 COMMENT ON TABLE task_personas IS '任务目标人群画像表，存储AI分析的目标人群画像';
 COMMENT ON TABLE causal_analyses IS '因果分析结果表，存储因果推理引擎的分析结果';
 COMMENT ON TABLE survey_tasks IS '调查主表，存储调查任务配置';
@@ -2134,7 +2092,7 @@ UNION ALL SELECT '✓ 涅槃系统', 'calibration_tasks, redemption_attempts'
 UNION ALL SELECT '✓ 信誉系统', 'reputation_history, reputation_levels'
 UNION ALL SELECT '✓ 审计系统', 'audit_logs, task_status_audit, settlement_audit'
 UNION ALL SELECT '✓ v5.0功能', 'nda_agreements, crowdfunding_contributions, niche_tags_reference'
-UNION ALL SELECT '✓ 画像系统', 'agent_personas, task_personas'
+UNION ALL SELECT '✓ 画像系统', 'task_personas (agent_personas已移除)'
 UNION ALL SELECT '✓ 因果分析', 'causal_analyses'
 UNION ALL SELECT '✓ 调查模块', 'survey_tasks, survey_questions, survey_responses, survey_analyses'
 UNION ALL SELECT '✓ 索引', '所有性能优化索引已创建'

@@ -474,7 +474,7 @@ class AgentOracleClient:
         sets appropriate headers, and handles various error conditions.
         
         Rate limiting: Blocks until a token is available (max 30 second wait).
-        Timeout: All requests have a 30 second timeout.
+        Timeout: All requests have a 8 second timeout.
         Retries: Automatic retries for 5xx errors (configured in session).
         
         Args:
@@ -510,8 +510,8 @@ class AgentOracleClient:
         url = f"{self.base_url}{endpoint}"
         self.logger.info(f"[AgentOracle] 🌐 请求 URL: {method} {url}")
         
-        # Set timeout to 30 seconds
-        timeout = 30
+        # Set timeout to 8 seconds
+        timeout = 8
         
         try:
             if method == "GET":

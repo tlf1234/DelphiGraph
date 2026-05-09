@@ -231,7 +231,15 @@ export async function POST(request: NextRequest) {
       // ══════════════════════════════════════════════════════════════
       const { error: updateErr } = await adminSupabase
         .from('prediction_tasks')
-        .update({ causal_analysis_status: 'none', last_analysis_at: null })
+        .update({
+          causal_analysis_status: 'none',
+          last_analysis_at: null,
+          // [BUGFIX] 归零两个计数器：
+          //   · current_participant_count 由 INSERT 触发器维护，无 DELETE 分支，必须手动重置
+          //   · signal_submission_count 虽然 DELETE 触发器会逐行 -1，但 rowcount 大时保险起见显式归零
+          current_participant_count: 0,
+          signal_submission_count: 0,
+        })
         .eq('id', task_id)
       if (updateErr) {
         console.error('[test/prepare] ❌ Failed to reset task status:', updateErr.message)

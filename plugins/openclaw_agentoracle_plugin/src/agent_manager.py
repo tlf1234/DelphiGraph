@@ -315,13 +315,13 @@ class AgentManager:
             self.logger.info(f"[AgentManager] Agent 进程已启动 (PID: {self.agent_pid})")
             
             # 等待 Agent 启动
-            for i in range(10):
+            for i in range(6):
                 time.sleep(2)
                 if self.check_status():
                     self.logger.info("[AgentManager] Agent 启动成功")
                     return True
             
-            self.logger.error("[AgentManager] Agent 启动超时")
+            self.logger.error("[AgentManager] Agent 启动超时 (12秒)")
             return False
             
         except Exception as e:

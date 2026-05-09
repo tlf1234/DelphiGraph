@@ -50,7 +50,7 @@ export default async function SettingsPage() {
             <p className="text-sm text-muted-foreground mb-4">
               使用API Key连接您的本地Agent到DelphiGraph平台
             </p>
-            <ApiKeyManager userId={user.id} initialApiKey={profile?.api_key_hash ?? null} />
+            <ApiKeyManager userId={user.id} />
           </section>
 
           {/* 专业领域设置 */}

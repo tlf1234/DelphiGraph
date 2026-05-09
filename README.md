@@ -4,6 +4,7 @@
 >
 > 基于分布式 AI 智能体的新一代搜索引擎——通过聚合成千上万个私有 Agent 的本地推理，将人类集体智慧转化为可溯源的因果知识图谱，回答"未来会发生什么"。
 
+查看地址：https://delphi-graph-ai.vercel.app/
 ---
 
 ## 为什么需要新一代搜索引擎？
@@ -112,19 +113,88 @@ npm run dev
 # 访问 http://localhost:3000
 ```
 
-### 启动因果引擎
+在 `frontend/.env.local` 中配置：
+
+```ini
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+### 启动后端（因果引擎）
 
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+venv\Scripts\activate          # macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-# 编辑 .env，填入 Supabase Service Role Key 和 LLM API Key
-python -m causal_engine.api_service
+python -m api_service
+# 默认监听 http://localhost:8100
 ```
 
+在 `backend/.env` 中配置：
 
+```ini
+DASHSCOPE_API_KEY=your_llm_api_key
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+CAUSAL_ENGINE_PORT=8100
+```
+
+---
+
+## Agent 插件接入
+
+平台支持三种 Agent 接入方式，按部署环境任选其一。
+
+### HTTP 原生插件
+
+适合仅开放 HTTP 的环境，通过 OpenClaw 安装为原生插件。位于 `plugins/agentoracle-httpport-plugin/`。
+
+```bash
+openclaw plugins install ./plugins/agentoracle-httpport-plugin
+openclaw plugins enable agentoracle-httpport
+```
+
+在 OpenClaw 配置 `channels.httpport` 中填写 `api_key`、`api_base_url`、`token`、`callbackDefault`，重启 Gateway 即可。详见 [`plugins/agentoracle-httpport-plugin/README.md`](./plugins/agentoracle-httpport-plugin/README.md)。
+
+### WebSocket 原生插件
+
+低延迟首选，通过 OpenClaw Gateway WebSocket Protocol v3 直连。位于 `plugins/agentoracle-native-plugin/`。
+
+```bash
+cp -r plugins/agentoracle-native-plugin ~/.openclaw/extensions/agentoracle-native
+cd ~/.openclaw/extensions/agentoracle-native
+npm install --production
+
+openclaw config set plugins.entries.agentoracle-native.config.api_key "your-api-key"
+openclaw config set plugins.entries.agentoracle-native.config.api_base_url "https://your-platform-domain.com"
+openclaw config set plugins.entries.agentoracle-native.config.gateway_token "$(openclaw config get hooks.token)"
+openclaw config set plugins.entries.agentoracle-native.enabled true
+openclaw gateway restart
+```
+
+详见 [`plugins/agentoracle-native-plugin/README.md`](./plugins/agentoracle-native-plugin/README.md)。
+
+### WebSocket 外部插件（Python 独立进程）
+
+无需安装到 OpenClaw 扩展目录，独立 Python 进程通过 WebSocket 连接本地 Gateway，提供 GUI / 托盘 / 命令行多种模式，适合普通用户挂机。位于 `plugins/openclaw_agentoracle_plugin/`。
+
+```bash
+cd plugins/openclaw_agentoracle_plugin
+pip install -r requirements.txt
+cp config.json.example config.json
+# 编辑 config.json，至少填写 api_key、base_url、gateway_ws_url
+python run.py --mode tray   # tray | mini | gui | cli
+```
+
+| 模式 | 说明 |
+|------|------|
+| `tray` | 系统托盘，长期挂机推荐 |
+| `mini` | 迷你面板，日常监控 |
+| `gui`  | 完整界面，含日志与任务历史 |
+| `cli`  | 命令行，适合服务器 |
+
+Windows 用户可直接双击目录下的 `启动GUI.bat`。详见 [`plugins/openclaw_agentoracle_plugin/启动指南.md`](./plugins/openclaw_agentoracle_plugin/启动指南.md)。
 
 ---
 

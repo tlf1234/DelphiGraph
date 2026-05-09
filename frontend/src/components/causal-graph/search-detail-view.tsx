@@ -238,16 +238,12 @@ export default function SearchDetailView({
   const [showSimPanel, setShowSimPanel] = useState(false)  // 是否显示模拟测试面板
   const [showPluginPanel, setShowPluginPanel] = useState(false)  // [TEMP-PLUGIN] 插件信号监控面板
   const [isClearing, setIsClearing] = useState(false)  // 数据清理中
-  const simRef = useRef<SimState>(sim)  // sim 状态的 ref 副本，避免闭包陷阱
   const simAbortRef = useRef(false)  // 用户中止标志
   const hasRealAnalysisRef = useRef(false)  // 已收到真实LLM分析结果，停止预览图更新
   const hasStartedFactorRevealRef = useRef(false) // 已启动因子揭示动画，防止多次重绘
   const fullEnrichedGraphRef = useRef<any>(null)  // 完整图谱（全量信号+因子），供「图谱演示」重放
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)  // 轮询定时器引用
   const signalCountTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)  // 信号数量监控定时器（真实模式）
-
-  // 同步 sim 到 ref，避免闭包问题
-  useEffect(() => { simRef.current = sim }, [sim])
 
   // ══════════════════════════════════════════════════════════════
   // 工具函数：addLog（添加日志）
@@ -268,15 +264,22 @@ export default function SearchDetailView({
     setIsClearing(true)
     addLog('🗑 正在清除任务历史数据...')
     try {
-      const res = await fetch(`/api/tasks/${task.id}/cleanup`, { method: 'POST' })
+      const res = await fetch('/api/test/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: task.id })
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-      addLog(`✅ 清除完成：${data.deletedSignals} 条信号，${data.deletedAnalyses} 条分析记录`)
+      addLog(`✅ 清除完成：${data.deletedSignals ?? 0} 条信号，${data.deletedAnalyses ?? 0} 条分析记录`)
       setLiveAnalysis(null)
       setLiveSubCount(0)
       setSim(prev => ({ ...prev, phase: 'idle', uploadedCount: 0, batchDone: 0 }))
     } catch (e) {
       addLog(`❌ 清除失败: ${e}`)
+      
+      
+      
     } finally {
       setIsClearing(false)
     }
@@ -520,12 +523,12 @@ export default function SearchDetailView({
           }
         }
 
-        // Step 3: 达到目标 → 停止监控，触发分析
-        if (currentCount >= targetCount) {
-          console.log('[startRealMode] ✅ 信号达标，停止监控并触发因果分析', { currentCount, targetCount })
-          stopSignalCountPoll()
+        // Step 3: 达到目标 → 触发分析（注意：不停止轮询，让预览图继续更新到全部信号到达；
+        //         hasRealAnalysisRef 在 LLM 图谱返回后会阻止预览图覆盖真实图谱）
+        if (currentCount >= targetCount && !hasRealAnalysisRef.current) {
+          console.log('[startRealMode] ✅ 信号达标，触发因果分析（继续轮询以更新预览图）', { currentCount, targetCount })
           addLog(`✅ 信号量已达到目标（${currentCount} / ${targetCount}），触发因果推演...`)
-          setSim(prev => ({ ...prev, phase: 'analyzing' }))
+          setSim(prev => prev.phase === 'analyzing' ? prev : { ...prev, phase: 'analyzing' })
         }
       } catch {
         // 静默忽略轮询网络错误
@@ -1050,6 +1053,7 @@ export default function SearchDetailView({
             taskId={task.id}
             onTriggerAnalysis={triggerAnalysis}
             onStartPolling={startPolling}
+            onStartRealMode={startRealMode}
             onClose={() => setShowPluginPanel(false)}
           />
         )}
@@ -1288,49 +1292,7 @@ export default function SearchDetailView({
             <span className="hidden sm:inline">发起调查</span>
           </Link>
 
-          {/* 启动监控按钮 — 手动开始信号追踪 & 因果分析 */}
-          <div className="w-px h-4 bg-white/[0.06]" />
-          <button
-            onClick={() => {
-              if (sim.phase !== 'idle' && sim.phase !== 'complete' && sim.phase !== 'error') {
-                console.log('[header] 用户点击停止监控', { phase: sim.phase, mode: sim.mode })
-                stopSimulation()
-              } else {
-                console.log('[header] 用户点击启动监控', { phase: sim.phase, taskId: task.id })
-                startRealMode()
-              }
-            }}
-            disabled={!!initialAnalysis}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium transition-all border ${
-              sim.mode === 'real' && sim.phase !== 'idle' && sim.phase !== 'complete' && sim.phase !== 'error'
-                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 animate-pulse'
-                : initialAnalysis
-                  ? 'bg-white/5 text-zinc-600 border-white/5 cursor-not-allowed'
-                  : 'bg-white/5 text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 border-white/10 hover:border-emerald-500/30'
-            }`}
-            title={
-              initialAnalysis
-                ? '已有分析结果'
-                : sim.phase !== 'idle' && sim.phase !== 'complete' && sim.phase !== 'error'
-                  ? '点击停止监控'
-                  : '启动信号监控，等待 Agent 提交后自动触发因果分析'
-            }
-          >
-            {sim.mode === 'real' && sim.phase !== 'idle' && sim.phase !== 'complete' && sim.phase !== 'error' ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span className="hidden sm:inline">监控中</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              </>
-            ) : (
-              <>
-                <Play className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{initialAnalysis ? '已完成' : '启动监控'}</span>
-              </>
-            )}
-          </button>
-
-          {/* [TEMP-PLUGIN] 插件监控按钮 */}
+          {/* [TEMP-PLUGIN] 插件监控按钮（监控入口唯一化：启动后 Panel 内「开始监控」同步触发实时预览图谱构建）*/}
           <div className="w-px h-4 bg-white/[0.06]" />
           <button
             onClick={() => setShowPluginPanel(v => !v)}
